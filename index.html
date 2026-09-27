@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@500;600;700&family=Hind+Siliguri:wght@400;500;600;700&display=swap">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <style>
   :root{
     --bg:#FBF7EE; --card:#FFFFFF; --sage:#EEF2E8; --green:#14432A; --greenDeep:#0D3320;
@@ -47,6 +48,10 @@
   .topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px;}
   .icon-btn{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:15px;}
   .backup-actions{display:flex;gap:8px;}
+  #backupReminderBanner:empty{display:none;}
+  .backup-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    background:#FBF0DC;border:1px solid var(--gold);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:13.5px;color:var(--greenDeep);}
+  .backup-banner .bb-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .content-wrap{max-width:1100px;margin:0 auto;}
   .arch{background:var(--card);border:1px solid var(--border);border-radius:28px 28px 10px 10px;box-shadow:0 1px 2px rgba(20,67,42,.05);}
   .sec-head{display:flex;align-items:center;gap:14px;margin-bottom:20px;}
@@ -158,6 +163,8 @@
         <input type="file" id="importFile" accept="application/json" hidden>
       </div>
     </div>
+    <div id="backupReminderBanner"></div>
+    <div id="dailyBackupPromptBanner"></div>
     <div class="content-wrap" id="content"></div>
   </main>
 </div>
@@ -173,7 +180,8 @@ function defaultDB(){
     boardingBills:[], classRoutine:[], examRoutine:[], results:[],
     studentIdCounters:{}, attendance:[], boardingAttendance:[],
     libraryLoans:[], patronMembers:[], patronPayments:[],
-    teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[]
+    teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[],
+    activityLog:[], paymentClaims:[]
   };
 }
 function loadDB(){
@@ -185,9 +193,33 @@ function loadDB(){
 }
 let db = loadDB();
 function saveDB(){ localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+const ACTIVITY_LOG_MAX = 500;
+function logActivity(action, summary){
+  db.activityLog = db.activityLog || [];
+  db.activityLog.unshift({
+    id: uid(),
+    at: new Date().toISOString(),
+    action, summary
+  });
+  if(db.activityLog.length > ACTIVITY_LOG_MAX) db.activityLog.length = ACTIVITY_LOG_MAX;
+}
+
+/* ============================ বিকাশ/নগদ পেমেন্ট সেটিংস ============================ */
+const PAYMENT_CONFIG_KEY = "madrasaPaymentConfig_v1";
+function getPaymentConfig(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(PAYMENT_CONFIG_KEY) || "null");
+    if(saved) return saved;
+  }catch(e){}
+  return { bkashNumber:"", bkashType:"personal", nagadNumber:"", nagadType:"personal", instructions:"" };
+}
+function savePaymentConfig(cfg){ localStorage.setItem(PAYMENT_CONFIG_KEY, JSON.stringify(cfg)); }
 
 /* ============================ গোপন কোড (PIN) সুরক্ষা ============================ */
 const PIN_KEY = "madrasaPIN_v1";
+const PIN_ATTEMPT_KEY = "madrasaPinAttempts_v1";
+const PIN_LOCK_KEY = "madrasaPinLockUntil_v1";
+const MAX_PIN_ATTEMPTS = 5;
 function simpleHash(str){
   let h = 5381;
   for(let i=0;i<str.length;i++){ h = ((h*33) ^ str.charCodeAt(i)) >>> 0; }
@@ -195,7 +227,53 @@ function simpleHash(str){
 }
 function getStoredPinHash(){ return localStorage.getItem(PIN_KEY); }
 function setStoredPinHash(hash){ localStorage.setItem(PIN_KEY, hash); }
-function clearStoredPin(){ localStorage.removeItem(PIN_KEY); }
+function clearStoredPin(){
+  localStorage.removeItem(PIN_KEY);
+  localStorage.removeItem(PIN_ATTEMPT_KEY);
+  localStorage.removeItem(PIN_LOCK_KEY);
+}
+function getPinAttempts(){ return parseInt(localStorage.getItem(PIN_ATTEMPT_KEY) || "0", 10); }
+function setPinAttempts(n){ localStorage.setItem(PIN_ATTEMPT_KEY, String(n)); }
+function getPinLockUntil(){ return parseInt(localStorage.getItem(PIN_LOCK_KEY) || "0", 10); }
+function setPinLockUntil(ts){ localStorage.setItem(PIN_LOCK_KEY, String(ts)); }
+function pinLockSecondsLeft(){
+  const left = Math.ceil((getPinLockUntil() - Date.now()) / 1000);
+  return left > 0 ? left : 0;
+}
+function registerFailedPinAttempt(){
+  const n = getPinAttempts() + 1;
+  setPinAttempts(n);
+  if(n >= MAX_PIN_ATTEMPTS){
+    // প্রতিটি নতুন লকের সময় আগেরটির দ্বিগুণ (৩০সে → ১মি → ২মি → ৪মি...), সর্বোচ্চ ৩০ মিনিট
+    const priorLocks = Math.floor(n / MAX_PIN_ATTEMPTS) - 1;
+    const waitSec = Math.min(1800, 30 * Math.pow(2, Math.max(0, priorLocks)));
+    setPinLockUntil(Date.now() + waitSec * 1000);
+  }
+}
+function registerSuccessfulPinAttempt(){
+  setPinAttempts(0);
+  setPinLockUntil(0);
+}
+let pinLockTimerHandle = null;
+function startPinLockCountdown(){
+  if(pinLockTimerHandle) clearInterval(pinLockTimerHandle);
+  pinLockTimerHandle = setInterval(() => {
+    const secLeft = pinLockSecondsLeft();
+    const overlay = document.getElementById("lockOverlay");
+    if(!overlay || overlay.classList.contains("hidden")) { clearInterval(pinLockTimerHandle); return; }
+    if(secLeft <= 0){
+      clearInterval(pinLockTimerHandle);
+      showLockOverlay("unlock");
+      return;
+    }
+    const span = document.getElementById("pinLockCountdown");
+    if(span) span.textContent = formatLockCountdown(secLeft);
+  }, 1000);
+}
+function formatLockCountdown(sec){
+  const m = Math.floor(sec/60), s = sec%60;
+  return (m>0 ? bn(m)+" মিনিট " : "") + bn(s) + " সেকেন্ড";
+}
 
 function showLockOverlay(mode, errorMsg){
   const overlay = document.getElementById("lockOverlay");
@@ -239,6 +317,16 @@ function lockScreenHTML(mode, errorMsg){
     </div>`;
   }
   if(mode === "guardian"){
+    const secLeft = guardianLockSecondsLeft();
+    if(secLeft > 0){
+      return `<div class="lock-box">
+        <div class="eyebrow2">🔒 সাময়িকভাবে বন্ধ</div>
+        <h2>অনেকবার ভুল তথ্য দেওয়া হয়েছে</h2>
+        <p class="hint">নিরাপত্তার জন্য কিছুক্ষণ অপেক্ষা করুন। বাকি সময়: <strong id="guardianLockCountdown">${formatLockCountdown(secLeft)}</strong></p>
+        <div class="lock-links"><a id="guardianBackToLogin">🔑 প্রশাসনিক প্রবেশে ফিরে যান</a></div>
+      </div>`;
+    }
+    const gAttemptHint = getGuardianAttempts() > 0 ? `<p class="hint" style="color:var(--due);">আর ${bn(MAX_GUARDIAN_ATTEMPTS - (getGuardianAttempts() % MAX_GUARDIAN_ATTEMPTS))} বার ভুল হলে সাময়িকভাবে বন্ধ হয়ে যাবে।</p>` : "";
     return `<div class="lock-box">
       <div class="eyebrow2">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</div>
       <h2>ছাত্রের তথ্য খুঁজুন</h2>
@@ -247,6 +335,7 @@ function lockScreenHTML(mode, errorMsg){
         <label class="field"><span>ছাত্র আইডি নং</span><input name="sid" autofocus required placeholder="যেমনঃ ২০২৬-০০০১"></label>
         <label class="field"><span>মোবাইল নম্বর</span><input name="mobile" required></label>
         ${err}
+        ${gAttemptHint}
         <button class="btn" type="submit" style="width:100%;justify-content:center;">খুঁজুন</button>
       </form>
       <div class="lock-links"><a id="guardianBackToLogin">🔑 প্রশাসনিক প্রবেশে ফিরে যান</a></div>
@@ -256,6 +345,18 @@ function lockScreenHTML(mode, errorMsg){
     return guardianResultHTML(currentGuardianStudent);
   }
   // unlock
+  const secLeft = pinLockSecondsLeft();
+  if(secLeft > 0){
+    return `<div class="lock-box">
+      <div class="eyebrow2">🔒 সাময়িকভাবে বন্ধ</div>
+      <h2>অনেকবার ভুল কোড দেওয়া হয়েছে</h2>
+      <p class="hint">নিরাপত্তার জন্য কিছুক্ষণ অপেক্ষা করুন। বাকি সময়: <strong id="pinLockCountdown">${formatLockCountdown(secLeft)}</strong></p>
+      <div class="lock-links"><a id="forgotPinLink">গোপন কোড ভুলে গেছেন?</a></div>
+    </div>`;
+  }
+  const attemptsInThisRound = getPinAttempts() % MAX_PIN_ATTEMPTS;
+  const attemptsLeft = MAX_PIN_ATTEMPTS - attemptsInThisRound;
+  const attemptHint = getPinAttempts() > 0 ? `<p class="hint" style="color:var(--due);">আর ${bn(attemptsLeft)} বার ভুল হলে সাময়িকভাবে বন্ধ হয়ে যাবে।</p>` : "";
   return `<div class="lock-box">
     <div class="eyebrow2">🌙 মাদরাসা ব্যবস্থাপনা</div>
     <h2>গোপন কোড দিন</h2>
@@ -263,10 +364,48 @@ function lockScreenHTML(mode, errorMsg){
     <form data-form="pin-unlock">
       <label class="field"><span>গোপন কোড</span><input type="password" inputmode="numeric" name="pin" maxlength="8" autofocus required></label>
       ${err}
+      ${attemptHint}
       <button class="btn" type="submit" style="width:100%;justify-content:center;">প্রবেশ করুন</button>
     </form>
     <div class="lock-links"><a id="forgotPinLink">গোপন কোড ভুলে গেছেন?</a> &nbsp;·&nbsp; <a id="guardianViewLink">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</a></div>
   </div>`;
+}
+
+/* ============================ অভিভাবক লুকআপ সুরক্ষা (ব্রুট-ফোর্স প্রতিরোধ) ============================ */
+const GUARDIAN_ATTEMPT_KEY = "madrasaGuardianAttempts_v1";
+const GUARDIAN_LOCK_KEY = "madrasaGuardianLockUntil_v1";
+const MAX_GUARDIAN_ATTEMPTS = 5;
+function getGuardianAttempts(){ return parseInt(localStorage.getItem(GUARDIAN_ATTEMPT_KEY) || "0", 10); }
+function setGuardianAttempts(n){ localStorage.setItem(GUARDIAN_ATTEMPT_KEY, String(n)); }
+function getGuardianLockUntil(){ return parseInt(localStorage.getItem(GUARDIAN_LOCK_KEY) || "0", 10); }
+function setGuardianLockUntil(ts){ localStorage.setItem(GUARDIAN_LOCK_KEY, String(ts)); }
+function guardianLockSecondsLeft(){
+  const left = Math.ceil((getGuardianLockUntil() - Date.now()) / 1000);
+  return left > 0 ? left : 0;
+}
+function registerFailedGuardianAttempt(){
+  const n = getGuardianAttempts() + 1;
+  setGuardianAttempts(n);
+  if(n >= MAX_GUARDIAN_ATTEMPTS){
+    const priorLocks = Math.floor(n / MAX_GUARDIAN_ATTEMPTS) - 1;
+    const waitSec = Math.min(1800, 30 * Math.pow(2, Math.max(0, priorLocks)));
+    setGuardianLockUntil(Date.now() + waitSec * 1000);
+  }
+}
+function registerSuccessfulGuardianAttempt(){
+  setGuardianAttempts(0);
+  setGuardianLockUntil(0);
+}
+let guardianLockTimerHandle = null;
+function startGuardianLockCountdown(){
+  if(guardianLockTimerHandle) clearInterval(guardianLockTimerHandle);
+  guardianLockTimerHandle = setInterval(() => {
+    const secLeft = guardianLockSecondsLeft();
+    const span = document.getElementById("guardianLockCountdown");
+    if(!span){ clearInterval(guardianLockTimerHandle); return; }
+    if(secLeft <= 0){ clearInterval(guardianLockTimerHandle); showLockOverlay("guardian"); return; }
+    span.textContent = formatLockCountdown(secLeft);
+  }, 1000);
 }
 
 let currentGuardianStudent = null;
@@ -305,15 +444,66 @@ function guardianResultHTML(s){
       ${isBoarder ? `<p style="margin:0 0 10px;"><strong>সাম্প্রতিক বোর্ডিং বিল:</strong><br>${bills.length ? bills.map(f=>esc(f.month)+" "+bn(f.year)+": "+taka(f.amount)+" — "+esc(f.status)).join("<br>") : "তথ্য নেই"}</p>` : ""}
       <p style="margin:0;"><strong>সাম্প্রতিক ফলাফল:</strong><br>${results.length ? results.map(r=>esc(r.examName||"পরীক্ষা")+" — "+esc(r.subject)+": "+bn(r.obtained)+"/"+bn(r.fullMarks)).join("<br>") : "তথ্য নেই"}</p>
     </div>
+    ${guardianPaymentSectionHTML(s)}
     <button class="btn ghost" type="button" id="guardianBack" style="width:100%;justify-content:center;margin-top:16px;">🔎 আবার খুঁজুন</button>
   </div>`;
 }
+function guardianPaymentSectionHTML(s){
+  const pcfg = getPaymentConfig();
+  if(!pcfg.bkashNumber && !pcfg.nagadNumber) return "";
+  const unpaidFees = db.monthlyFees.filter(f=>f.studentId===s.id && f.status==="বাকি").map(f=>({...f, billKind:"fees", label:"মাসিক বেতন — "+f.month+" "+bn(f.year)+" ("+taka(f.amount)+")"}));
+  const unpaidBills = db.boardingBills.filter(f=>f.studentId===s.id && f.status==="বাকি").map(f=>({...f, billKind:"boardingBills", label:"বোর্ডিং বিল — "+f.month+" "+bn(f.year)+" ("+taka(f.amount)+")"}));
+  const unpaid = [...unpaidFees, ...unpaidBills];
+  const myClaims = (db.paymentClaims||[]).filter(c=>c.studentId===s.id).sort((a,b)=>(b.submittedAt||"").localeCompare(a.submittedAt||""));
+  return `
+    <div style="margin-top:18px;padding-top:16px;border-top:1px dashed #ccc;text-align:right;">
+      <h3 style="margin:0 0 8px;color:var(--green);font-size:15px;">📱 বিকাশ/নগদে বেতন পরিশোধ</h3>
+      <div style="font-size:13px;line-height:1.9;background:#F4F1E6;border-radius:10px;padding:10px 14px;margin-bottom:12px;">
+        ${pcfg.bkashNumber ? `<div>বিকাশ (${pcfg.bkashType==="agent"?"এজেন্ট — Cash Out/Payment":"পার্সোনাল — Send Money"}): <strong style="direction:ltr;display:inline-block;">${esc(pcfg.bkashNumber)}</strong></div>` : ""}
+        ${pcfg.nagadNumber ? `<div>নগদ (${pcfg.nagadType==="agent"?"এজেন্ট — Cash Out/Payment":"পার্সোনাল — Send Money"}): <strong style="direction:ltr;display:inline-block;">${esc(pcfg.nagadNumber)}</strong></div>` : ""}
+        ${pcfg.instructions ? `<div style="margin-top:6px;color:var(--inkSoft);">${esc(pcfg.instructions)}</div>` : ""}
+      </div>
+      ${unpaid.length ? `
+      <p class="hint" style="text-align:right;">টাকা পাঠানোর পর নিচের ফর্মে ট্রানজেকশন আইডি (TrxID) জমা দিন — মাদরাসা কর্তৃপক্ষ যাচাই করে বেতন "পরিশোধিত" দেখাবেন।</p>
+      <form data-form="guardianPaymentClaim">
+        <label class="field"><span>কোন বিল পরিশোধ করেছেন</span>
+          <select name="billCombo" required>
+            ${unpaid.map(b=>`<option value="${b.billKind}|${b.id}">${esc(b.label)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field"><span>মাধ্যম</span>
+          <select name="method">
+            ${pcfg.bkashNumber?`<option value="bkash">বিকাশ</option>`:""}
+            ${pcfg.nagadNumber?`<option value="nagad">নগদ</option>`:""}
+          </select>
+        </label>
+        <label class="field"><span>যে নম্বর থেকে পাঠিয়েছেন</span><input name="senderMobile" required placeholder="যেমনঃ ০১৭xxxxxxxx"></label>
+        <label class="field"><span>ট্রানজেকশন আইডি (TrxID)</span><input name="trxId" required style="direction:ltr;"></label>
+        <button class="btn" type="submit" style="width:100%;justify-content:center;">✅ জমা দিন</button>
+      </form>` : `<p class="hint" style="text-align:right;">এই মুহূর্তে কোনো বকেয়া বিল নেই — জমা দেওয়ার কিছু নেই।</p>`}
+      ${myClaims.length ? `
+      <div style="margin-top:14px;">
+        <div style="font-size:12.5px;color:var(--inkSoft);margin-bottom:4px;">পূর্বের জমা দেওয়া তথ্য:</div>
+        ${myClaims.slice(0,3).map(c=>`<div style="font-size:12.5px;padding:6px 0;border-top:1px dashed #ddd;">
+          ${c.month} ${bn(c.year)} — ${taka(c.amount)} —
+          ${c.status==="pending"?`<span style="color:var(--due);">⏳ যাচাই চলছে</span>`:c.status==="verified"?`<span style="color:var(--paid);">✅ নিশ্চিত হয়েছে</span>`:`<span style="color:var(--due);">❌ বাতিল হয়েছে</span>`}
+        </div>`).join("")}
+      </div>` : ""}
+    </div>`;
+}
 function handleGuardianForm(type, fd){
   if(type === "guardian-lookup"){
+    if(guardianLockSecondsLeft() > 0){ showLockOverlay("guardian"); startGuardianLockCountdown(); return; }
     const sid = (fd.get("sid")||"").trim();
     const mobile = (fd.get("mobile")||"").trim();
-    const student = db.students.find(s => s.sid===sid && (s.mobile||"").trim()===mobile);
-    if(!student){ showLockOverlay("guardian", "তথ্য মিলছে না। ছাত্র আইডি ও মোবাইল নম্বর সঠিকভাবে দিন।"); return; }
+    const student = db.students.find(s => s.sid===sid && normalizeMobile(s.mobile)===normalizeMobile(mobile));
+    if(!student){
+      registerFailedGuardianAttempt();
+      if(guardianLockSecondsLeft() > 0){ showLockOverlay("guardian"); startGuardianLockCountdown(); return; }
+      showLockOverlay("guardian", "তথ্য মিলছে না। ছাত্র আইডি ও মোবাইল নম্বর সঠিকভাবে দিন।");
+      return;
+    }
+    registerSuccessfulGuardianAttempt();
     currentGuardianStudent = student;
     showLockOverlay("guardianResult");
     return;
@@ -331,10 +521,19 @@ function handlePinForm(type, fd){
     return;
   }
   if(type === "pin-unlock"){
+    if(pinLockSecondsLeft() > 0){ showLockOverlay("unlock"); startPinLockCountdown(); return; }
     const pin = fd.get("pin");
-    if(simpleHash(pin) !== getStoredPinHash()){ showLockOverlay("unlock", "কোডটি সঠিক নয়, আবার চেষ্টা করুন।"); return; }
+    if(simpleHash(pin) !== getStoredPinHash()){
+      registerFailedPinAttempt();
+      if(pinLockSecondsLeft() > 0){ showLockOverlay("unlock"); startPinLockCountdown(); return; }
+      showLockOverlay("unlock", "কোডটি সঠিক নয়, আবার চেষ্টা করুন।");
+      return;
+    }
+    registerSuccessfulPinAttempt();
     hideLockOverlay();
     renderContent();
+    checkBackupReminder();
+    checkDailyBackupPrompt();
     return;
   }
   if(type === "pin-change"){
@@ -360,6 +559,13 @@ function factoryResetForgotPin(){
 
 const BN_DIGITS = ["০","১","২","৩","৪","৫","৬","৭","৮","৯"];
 function bn(n){ return String(n).replace(/[0-9]/g, d => BN_DIGITS[d]); }
+function normalizeMobile(m){
+  let s = String(m||"").replace(/[০-৯]/g, d => String(BN_DIGITS.indexOf(d)));
+  s = s.replace(/\D/g, "");
+  s = s.replace(/^0*88/, "");
+  s = s.replace(/^0+/, "");
+  return s.slice(-10);
+}
 function taka(n){ return "৳" + bn(Number(n||0).toLocaleString("en-IN")); }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -540,6 +746,59 @@ function monthKeyLabel(key){
   return MONTHS_BN[parseInt(m,10)-1] + " " + bn(y);
 }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ============================ CSV এক্সপোর্ট ইউটিলিটি ============================ */
+function csvCell(v){
+  const s = v==null ? "" : String(v);
+  if(/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+function downloadCSV(filename, headers, rows){
+  const lines = [headers.map(csvCell).join(",")];
+  rows.forEach(r => lines.push(r.map(csvCell).join(",")));
+  // Excel-এ বাংলা সঠিকভাবে দেখানোর জন্য UTF-8 BOM যোগ করা হলো
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], {type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function exportStudentsCSV(){
+  const headers = ["ছাত্র আইডি নং","ভর্তি নং","ছাত্রের নাম","পিতার নাম","জন্মতারিখ","শ্রেণি","মোবাইল","বেতনের কোঠা","বোর্ডিং কোঠা","ভর্তির তারিখ"];
+  const rows = db.students.map(s => [
+    s.sid||"", s.admissionNo||"", s.name||"", s.fatherName||"", s.dob?fmtDate(s.dob):"",
+    s.className||"", s.mobile||"", s.feeQuota||0, s.boardingQuota||0, s.date?fmtDate(s.date):""
+  ]);
+  downloadCSV("ছাত্র-তালিকা-" + todayISO() + ".csv", headers, rows);
+}
+function exportMonthlyReportCSV(){
+  const headers = ["মাস","সাধারণ আয়","বেতন আদায়","বোর্ডিং আদায়","বদরী চাঁদা","মোট আয়","সাধারণ ব্যয়","শিক্ষক বেতন","মোট ব্যয়","জমা/ঘাটতি"];
+  const rows = monthlyReportRows().map(r => [
+    monthKeyLabel(r.key).replace(/<[^>]+>/g,""), r.generalIncome, r.feeIncome, r.boardingIncome, r.patronIncome,
+    r.income, r.generalExpense, r.teacherSalaryExpense, r.expense, r.income - r.expense
+  ]);
+  downloadCSV("মাসিক-আয়-ব্যয়-" + todayISO() + ".csv", headers, rows);
+}
+function exportLedgerCSV(tab){
+  const cfg = LEDGER_CONFIGS[tab];
+  if(!cfg) return;
+  const headers = [cfg.noLabel, "তারিখ", cfg.partyLabel];
+  if(cfg.extraLabel) headers.push(cfg.extraLabel);
+  headers.push("বিবরণ", cfg.amountLabel);
+  const rows = db[cfg.key].map(r => {
+    const row = [r.no||"", r.date?fmtDate(r.date):"", r.party||""];
+    if(cfg.extraLabel) row.push(r.extra||"");
+    row.push(r.desc||"", r.amount||0);
+    return row;
+  });
+  downloadCSV(cfg.title + "-" + todayISO() + ".csv", headers, rows);
+}
+function exportActivityLogCSV(){
+  const headers = ["তারিখ", "সময়", "ধরন", "বিবরণ"];
+  const rows = (db.activityLog||[]).map(l => [fmtDate(l.at.slice(0,10)), l.at.slice(11,16), l.action, l.summary]);
+  downloadCSV("activity-log-" + todayISO() + ".csv", headers, rows);
+}
 function shortId(idStr){
   if(!idStr) return "-";
   return String(idStr).replace(/^[০-৯0-9]{4}-/, "").replace(/^শি-[০-৯0-9]{4}-/, "শি-");
@@ -589,6 +848,9 @@ const NAV = [
   {id:"results", label:"ফলাফল", icon:"🎓"},
   {id:"patrons", label:"বদরী সদস্য", icon:"🤝"},
   {id:"monthlyReport", label:"মাসিক আয়-ব্যয়ের হিসাব", icon:"📊"},
+  {id:"activityLog", label:"অ্যাক্টিভিটি লগ", icon:"📝"},
+  {id:"paymentClaims", label:"পেমেন্ট যাচাই", icon:"✅"},
+  {id:"paymentSettings", label:"বিকাশ/নগদ সেটিংস", icon:"📱"},
   {id:"onlineSync", label:"অনলাইন সিঙ্ক", icon:"☁️"}
 ];
 
@@ -786,6 +1048,9 @@ function renderTab(tab){
   if(tab === "examRoutine") return renderExamRoutineTab();
   if(tab === "results") return renderResultsTab();
   if(tab === "monthlyReport") return renderMonthlyReportTab();
+  if(tab === "activityLog") return renderActivityLogTab();
+  if(tab === "paymentClaims") return renderPaymentClaimsTab();
+  if(tab === "paymentSettings") return renderPaymentSettingsTab();
   if(tab === "onlineSync") return renderOnlineSyncTab();
   return "";
 }
@@ -886,7 +1151,10 @@ function renderLedgerTab(tab){
     </div>
     <div class="arch">
       <div class="tbl-toolbar">
-        <button class="btn ghost small" data-print="${tab}">🖨 প্রিন্ট করুন</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn ghost small" data-print="${tab}">🖨 প্রিন্ট করুন</button>
+          <button class="btn ghost small" data-csv="ledger:${tab}">⬇ Excel/CSV এক্সপোর্ট</button>
+        </div>
         <div class="search-box"><input placeholder="খুঁজুন..." data-search="${tab}" value="${esc(searchState[tab]||'')}"><span class="ic">🔍</span></div>
       </div>
       <div class="tbl-body" id="tbl-${tab}">${ledgerTableHTML(tab)}</div>
@@ -944,9 +1212,20 @@ function renderStudentsTab(){
         <label class="field"><span>ভর্তির তারিখ</span><input type="date" name="date" value="${editing?editing.date:todayISO()}"></label>
         <label class="field"><span>মাসিক বেতনের কোঠা</span><input type="number" step="0.01" name="feeQuota" value="${editing?esc(editing.feeQuota||''):''}" placeholder="টাকা"></label>
         <label class="field"><span>মাসিক বোর্ডিং বিলের কোঠা</span><input type="number" step="0.01" name="boardingQuota" value="${editing?esc(editing.boardingQuota||''):''}" placeholder="টাকা"></label>
-        <label class="field"><span>ছাত্রের ছবি (ঐচ্ছিক)</span>
-          ${editing && editing.photo ? `<div style="margin-bottom:6px;"><img src="${editing.photo}" style="width:48px;height:48px;border-radius:8px;object-fit:cover;"></div>` : ""}
-          <input type="file" name="photo" accept="image/*">
+        <label class="field" style="grid-column:span 2;"><span>ছাত্রের ছবি (ঐচ্ছিক)</span>
+          <div id="studentPhotoPreviewWrap" style="margin-bottom:8px;${editing && editing.photo ? '' : 'display:none;'}">
+            <img id="studentPhotoPreview" src="${editing && editing.photo ? editing.photo : ''}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <label class="btn ghost small" style="cursor:pointer;margin:0;">
+              📷 ক্যামেরায় তুলুন
+              <input type="file" name="photoCamera" accept="image/*" capture="environment" style="display:none;" data-photo-input>
+            </label>
+            <label class="btn ghost small" style="cursor:pointer;margin:0;">
+              🖼️ গ্যালারি থেকে বাছাই করুন
+              <input type="file" name="photoGallery" accept="image/*" style="display:none;" data-photo-input>
+            </label>
+          </div>
         </label>
         <div class="btn-end" style="gap:8px;">
           <button class="btn" type="submit">${editing ? "💾 হালনাগাদ করুন" : "➕ ভর্তি করুন"}</button>
@@ -970,6 +1249,7 @@ function renderStudentsTab(){
           <button class="btn ghost small" data-print="students">🖨 প্রিন্ট করুন</button>
           <button class="btn ghost small" data-print="idCards">🪪 আইডি কার্ড প্রিন্ট করুন</button>
           <button class="btn ghost small" data-action="backfill-ids">🔄 পুরনো ছাত্রদের আইডি তৈরি করুন</button>
+          <button class="btn ghost small" data-csv="students">⬇ Excel/CSV এক্সপোর্ট</button>
         </div>
         <div class="search-box"><input placeholder="খুঁজুন..." data-search="students" value="${esc(searchState.students||'')}"><span class="ic">🔍</span></div>
       </div>
@@ -998,7 +1278,7 @@ function billingTableHTML(tab){
         <td>${esc(st?st.sid||"-":"-")}</td><td>${esc(st?st.name:"অজানা")}</td><td>${esc(st?st.className:"-")}</td>
         <td>${esc(r.month)} ${bn(r.year)}</td><td>${taka(r.amount)}</td>
         <td><button class="status-chip ${r.status==='বাকি'?'status-due':'status-paid'}" data-toggle-status data-coll="${cfg.key}" data-id="${r.id}">${r.status}</button></td>
-        <td>${r.payDate?fmtDate(r.payDate):"-"}</td>
+        <td>${r.payDate?fmtDate(r.payDate)+(r.trxId?` <span title="TrxID: ${esc(r.trxId)} (${r.paymentMethod==='bkash'?'বিকাশ':r.paymentMethod==='nagad'?'নগদ':''})" style="cursor:help;">📱</span>`:""):"-"}</td>
         <td style="text-align:center;white-space:nowrap;"><span class="action-icons">
           <button class="del-btn" data-receipt="${tab}:${r.id}" title="রশিদ প্রিন্ট">🧾</button>
           <button class="del-btn" data-message="${tab}" data-id="${r.id}" title="মেসেজ কপি করুন">✉️</button>
@@ -1368,24 +1648,30 @@ function renderAttendanceTab(){
       <form data-form="attendanceDaily">
         <div style="overflow-x:auto;">
         <table style="table-layout:auto;border-collapse:collapse;width:auto;">
+          <colgroup>
+            <col>
+            <col>
+            ${attendanceState.className==='সকল শ্রেণী'?'<col>':''}
+            <col><col><col>
+          </colgroup>
           <thead><tr>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">আইডি</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">নাম</th>
-            ${attendanceState.className==='সকল শ্রেণী'?'<th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">শ্রেণি</th>':''}
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">উপস্থিত</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">অনুপস্থিত</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">ছুটি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">আইডি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">নাম</th>
+            ${attendanceState.className==='সকল শ্রেণী'?'<th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">শ্রেণি</th>':''}
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">উপস্থিত</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">অনুপস্থিত</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">ছুটি</th>
           </tr></thead>
           <tbody>${classStudents.map(s=>{
             const existing = getAttendance(attendanceState.date, s.id);
             const cur = existing ? existing.status : "উপস্থিত";
             return `<tr>
-              <td style="border:1px solid var(--border);padding:3px 6px;text-align:center;font-size:13px;white-space:nowrap;">${esc(shortId(s.sid))}</td>
-              <td style="border:1px solid var(--border);padding:3px 6px;font-size:13px;white-space:nowrap;">${esc(s.name)}</td>
-              ${attendanceState.className==='সকল শ্রেণী'?`<td style="border:1px solid var(--border);padding:3px 6px;text-align:center;font-size:12px;white-space:nowrap;">${esc(s.className)}</td>`:''}
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="status-${s.id}" value="উপস্থিত" style="width:17px;height:17px;" ${cur==='উপস্থিত'?'checked':''}></td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="status-${s.id}" value="অনুপস্থিত" style="width:17px;height:17px;" ${cur==='অনুপস্থিত'?'checked':''}></td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="status-${s.id}" value="ছুটি" style="width:17px;height:17px;" ${cur==='ছুটি'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px 3px;text-align:center;font-size:14px;">${esc(shortId(s.sid))}</td>
+              <td style="border:1px solid var(--border);padding:4px 10px;font-size:15px;white-space:nowrap;">${esc(s.name)}</td>
+              ${attendanceState.className==='সকল শ্রেণী'?`<td style="border:1px solid var(--border);padding:4px 3px;text-align:center;font-size:13px;">${esc(s.className)}</td>`:''}
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="status-${s.id}" value="উপস্থিত" style="width:20px;height:20px;" ${cur==='উপস্থিত'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="status-${s.id}" value="অনুপস্থিত" style="width:20px;height:20px;" ${cur==='অনুপস্থিত'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="status-${s.id}" value="ছুটি" style="width:20px;height:20px;" ${cur==='ছুটি'?'checked':''}></td>
             </tr>`;
           }).join("")}</tbody>
         </table>
@@ -1413,7 +1699,13 @@ function renderAttendanceTab(){
       </div>
     </div>
     <div class="arch">
-      <div class="tbl-toolbar"><button class="btn ghost small" data-print="attendanceRegister">🖨 হাজিরা শীট প্রিন্ট করুন</button><div></div></div>
+      <div class="tbl-toolbar">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn ghost small" data-print="attendanceRegister">🖨 হাজিরা শীট প্রিন্ট করুন</button>
+          <button class="btn ghost small" data-action="print-all-registers" title="প্রতিটি শ্রেণির ৩০ দিনের শীট আলাদা পৃষ্ঠায়, শেষে বোর্ডিং হাজিরা শীটও যোগ হবে">🖨 সব শ্রেণি + বোর্ডিং শীট (আলাদা আলাদা)</button>
+        </div>
+        <div></div>
+      </div>
       <div class="tbl-body">${attendanceSheetTableHTML("class")}</div>
     </div>`;
 }
@@ -1493,24 +1785,28 @@ function renderBoardingAttendanceTab(){
       <form data-form="boardingAttendanceDaily">
         <div style="overflow-x:auto;">
         <table style="table-layout:auto;border-collapse:collapse;width:auto;">
+          <colgroup>
+            <col><col><col>
+            <col><col><col>
+          </colgroup>
           <thead><tr>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">আইডি</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">নাম</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:12px;text-align:center;white-space:nowrap;">শ্রেণি</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">উপস্থিত</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">অনুপস্থিত</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">ছুটি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">আইডি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">নাম</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:13px;text-align:center;">শ্রেণি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">উপস্থিত</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">অনুপস্থিত</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">ছুটি</th>
           </tr></thead>
           <tbody>${boarders.map(s=>{
             const existing = getBoardingAttendance(boardingAttendanceState.date, s.id);
             const cur = existing ? existing.status : "উপস্থিত";
             return `<tr>
-              <td style="border:1px solid var(--border);padding:3px 6px;text-align:center;font-size:13px;white-space:nowrap;">${esc(shortId(s.sid))}</td>
-              <td style="border:1px solid var(--border);padding:3px 6px;font-size:13px;white-space:nowrap;">${esc(s.name)}</td>
-              <td style="border:1px solid var(--border);padding:3px 6px;text-align:center;font-size:12px;white-space:nowrap;">${esc(s.className)}</td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="bstatus-${s.id}" value="উপস্থিত" style="width:17px;height:17px;" ${cur==='উপস্থিত'?'checked':''}></td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="bstatus-${s.id}" value="অনুপস্থিত" style="width:17px;height:17px;" ${cur==='অনুপস্থিত'?'checked':''}></td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="bstatus-${s.id}" value="ছুটি" style="width:17px;height:17px;" ${cur==='ছুটি'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px 3px;text-align:center;font-size:14px;">${esc(shortId(s.sid))}</td>
+              <td style="border:1px solid var(--border);padding:4px 10px;font-size:15px;white-space:nowrap;">${esc(s.name)}</td>
+              <td style="border:1px solid var(--border);padding:4px 3px;text-align:center;font-size:13px;">${esc(s.className)}</td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="bstatus-${s.id}" value="উপস্থিত" style="width:20px;height:20px;" ${cur==='উপস্থিত'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="bstatus-${s.id}" value="অনুপস্থিত" style="width:20px;height:20px;" ${cur==='অনুপস্থিত'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="bstatus-${s.id}" value="ছুটি" style="width:20px;height:20px;" ${cur==='ছুটি'?'checked':''}></td>
             </tr>`;
           }).join("")}</tbody>
         </table>
@@ -1802,22 +2098,26 @@ function renderTeacherAttendanceTab(){
       <form data-form="teacherAttendanceDaily">
         <div style="overflow-x:auto;">
         <table style="table-layout:auto;border-collapse:collapse;width:auto;">
+          <colgroup>
+            <col><col>
+            <col><col><col>
+          </colgroup>
           <thead><tr>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">আইডি</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">নাম</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">উপস্থিত</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">অনুপস্থিত</th>
-            <th style="border:1px solid var(--border);padding:4px 6px;background:var(--sage);font-size:13px;text-align:center;white-space:nowrap;">ছুটি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">আইডি</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">নাম</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">উপস্থিত</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">অনুপস্থিত</th>
+            <th style="border:1px solid var(--border);padding:5px 3px;background:var(--sage);font-size:14px;text-align:center;">ছুটি</th>
           </tr></thead>
           <tbody>${teachers.map(t=>{
             const existing = getTeacherAttendance(teacherAttendanceState.date, t.id);
             const cur = existing ? existing.status : "উপস্থিত";
             return `<tr>
-              <td style="border:1px solid var(--border);padding:3px 6px;text-align:center;font-size:13px;white-space:nowrap;">${esc(shortId(t.tid))}</td>
-              <td style="border:1px solid var(--border);padding:3px 6px;font-size:13px;white-space:nowrap;">${esc(t.name)}</td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="tstatus-${t.id}" value="উপস্থিত" style="width:17px;height:17px;" ${cur==='উপস্থিত'?'checked':''}></td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="tstatus-${t.id}" value="অনুপস্থিত" style="width:17px;height:17px;" ${cur==='অনুপস্থিত'?'checked':''}></td>
-              <td style="border:1px solid var(--border);padding:2px;text-align:center;"><input type="radio" name="tstatus-${t.id}" value="ছুটি" style="width:17px;height:17px;" ${cur==='ছুটি'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px 3px;text-align:center;font-size:14px;">${esc(shortId(t.tid))}</td>
+              <td style="border:1px solid var(--border);padding:4px 10px;font-size:15px;white-space:nowrap;">${esc(t.name)}</td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="tstatus-${t.id}" value="উপস্থিত" style="width:20px;height:20px;" ${cur==='উপস্থিত'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="tstatus-${t.id}" value="অনুপস্থিত" style="width:20px;height:20px;" ${cur==='অনুপস্থিত'?'checked':''}></td>
+              <td style="border:1px solid var(--border);padding:4px;text-align:center;"><input type="radio" name="tstatus-${t.id}" value="ছুটি" style="width:20px;height:20px;" ${cur==='ছুটি'?'checked':''}></td>
             </tr>`;
           }).join("")}</tbody>
         </table>
@@ -2000,8 +2300,114 @@ function renderMonthlyReportTab(){
       <div class="arch stat"><div class="lbl">শিক্ষকদের বেতন পরিশোধ</div><div class="val due">${taka(totalTeacherSalary)}</div></div>
     </div>
     <div class="arch">
-      <div class="tbl-toolbar"><button class="btn ghost small" data-print="monthlyReport">🖨 প্রিন্ট করুন</button><div></div></div>
+      <div class="tbl-toolbar">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn ghost small" data-print="monthlyReport">🖨 প্রিন্ট করুন</button>
+          <button class="btn ghost small" data-csv="monthlyReport">⬇ Excel/CSV এক্সপোর্ট</button>
+        </div>
+        <div></div>
+      </div>
       <div class="tbl-body" id="tbl-monthlyReport">${monthlyReportTableHTML()}</div>
+    </div>`;
+}
+
+/* ============================ পেমেন্ট সেটিংস (বিকাশ/নগদ) ============================ */
+function renderPaymentSettingsTab(){
+  const cfg = getPaymentConfig();
+  const pendingCount = (db.paymentClaims||[]).filter(c=>c.status==="pending").length;
+  return `
+    <div class="sec-head"><div class="badge">📱</div><div><h2>বিকাশ/নগদ পেমেন্ট সেটিংস</h2><p>এখানে আপনার ব্যক্তিগত/এজেন্ট বিকাশ ও নগদ নম্বর দিন — অভিভাবক পোর্টালে এই নম্বরগুলো দেখানো হবে</p></div></div>
+    <div class="arch form-card">
+      <p style="margin:0 0 14px;font-size:13px;color:var(--inkSoft);line-height:1.7;">
+        যেহেতু কোনো মার্চেন্ট/পেমেন্ট গেটওয়ে অ্যাকাউন্ট নেই, তাই টাকা সরাসরি এই নম্বরে "Send Money" বা "Cash Out" করে পাঠাতে বলা হবে। এরপর অভিভাবক ট্রানজেকশন আইডি (TrxID) জমা দেবেন, আপনি নিজের বিকাশ/নগদ অ্যাপে যাচাই করে <strong>"পেমেন্ট যাচাই"</strong> ট্যাবে গিয়ে অনুমোদন করবেন — তখনই বেতন/বিল "পরিশোধিত" হয়ে যাবে।
+      </p>
+      <form class="grid" data-form="paymentConfig">
+        <label class="field"><span>বিকাশ নম্বর</span><input name="bkashNumber" value="${esc(cfg.bkashNumber||"")}" placeholder="যেমনঃ ০১৭xxxxxxxx"></label>
+        <label class="field"><span>বিকাশ নম্বরের ধরন</span>
+          <select name="bkashType">
+            <option value="personal" ${cfg.bkashType==="personal"?"selected":""}>পার্সোনাল (Send Money)</option>
+            <option value="agent" ${cfg.bkashType==="agent"?"selected":""}>এজেন্ট/মার্চেন্ট (Cash Out/Payment)</option>
+          </select>
+        </label>
+        <label class="field"><span>নগদ নম্বর</span><input name="nagadNumber" value="${esc(cfg.nagadNumber||"")}" placeholder="যেমনঃ ০১৭xxxxxxxx"></label>
+        <label class="field"><span>নগদ নম্বরের ধরন</span>
+          <select name="nagadType">
+            <option value="personal" ${cfg.nagadType==="personal"?"selected":""}>পার্সোনাল (Send Money)</option>
+            <option value="agent" ${cfg.nagadType==="agent"?"selected":""}>এজেন্ট/মার্চেন্ট (Cash Out/Payment)</option>
+          </select>
+        </label>
+        <label class="field" style="grid-column:span 2;"><span>বাড়তি নির্দেশনা (ঐচ্ছিক)</span><textarea name="instructions" rows="2" placeholder="যেমনঃ রেফারেন্সে ছাত্রের নাম লিখবেন">${esc(cfg.instructions||"")}</textarea></label>
+        <div class="btn-end"><button class="btn" type="submit">💾 সংরক্ষণ করুন</button></div>
+      </form>
+    </div>
+    <div class="arch form-card">
+      <div style="font-weight:700;color:var(--green);margin-bottom:4px;">যাচাই বাকি আছে এমন পেমেন্ট: ${bn(pendingCount)}টি</div>
+      <p style="margin:6px 0 0;font-size:12.5px;color:var(--inkSoft);">অভিভাবকদের জমা দেওয়া পেমেন্ট তথ্য দেখতে ও অনুমোদন করতে <strong>"পেমেন্ট যাচাই"</strong> ট্যাবে যান।</p>
+    </div>`;
+}
+
+/* ============================ পেমেন্ট যাচাই (অ্যাডমিন) ============================ */
+function renderPaymentClaimsTab(){
+  const claims = (db.paymentClaims||[]).slice().sort((a,b)=> (b.submittedAt||"").localeCompare(a.submittedAt||""));
+  const pending = claims.filter(c=>c.status==="pending");
+  const done = claims.filter(c=>c.status!=="pending");
+  function claimRow(c, showActions){
+    const st = db.students.find(s=>s.id===c.studentId);
+    const what = c.billKind==="fees" ? "মাসিক বেতন" : "বোর্ডিং বিল";
+    const statusBadge = c.status==="pending" ? `<span style="color:var(--due);font-weight:700;">⏳ অপেক্ষমাণ</span>`
+      : c.status==="verified" ? `<span style="color:var(--paid);font-weight:700;">✅ অনুমোদিত</span>`
+      : `<span style="color:var(--due);font-weight:700;">❌ বাতিল</span>`;
+    return `<tr>
+      <td>${st?esc(st.name):"অজানা ছাত্র"}${st?` <span style="color:var(--inkSoft);font-size:11.5px;">(${esc(st.sid||"-")})</span>`:""}</td>
+      <td>${esc(what)} — ${esc(c.month)} ${bn(c.year)}</td>
+      <td>${taka(c.amount)}</td>
+      <td>${c.method==="bkash"?"বিকাশ":"নগদ"}</td>
+      <td style="direction:ltr;text-align:right;">${esc(c.trxId||"-")}</td>
+      <td style="white-space:nowrap;">${c.submittedAt?fmtDate(c.submittedAt.slice(0,10))+" — "+c.submittedAt.slice(11,16):"-"}</td>
+      <td>${statusBadge}</td>
+      ${showActions ? `<td style="white-space:nowrap;">
+        <button class="btn small" data-action="approve-claim" data-id="${c.id}">✅ অনুমোদন</button>
+        <button class="btn ghost small" data-action="reject-claim" data-id="${c.id}">❌ বাতিল</button>
+      </td>` : "<td></td>"}
+    </tr>`;
+  }
+  return `
+    <div class="sec-head"><div class="badge">✅</div><div><h2>পেমেন্ট যাচাই</h2><p>অভিভাবকদের জমা দেওয়া বিকাশ/নগদ পেমেন্টের তথ্য — নিজের বিকাশ/নগদ অ্যাপে টাকা পাওয়া নিশ্চিত হয়ে তবেই অনুমোদন করুন</p></div></div>
+    <div class="arch">
+      <div class="sec-head" style="margin:0 0 10px;justify-content:space-between;display:flex;align-items:center;">
+        <div><h2 style="font-size:15px;">অপেক্ষমাণ (${bn(pending.length)}টি)</h2></div>
+        <div style="text-align:left;">
+          <button class="btn ghost small" id="fetchCloudClaimsBtn" type="button">☁️ ক্লাউড থেকে নতুন দাবি আনুন</button>
+          <div id="claimFetchStatus" style="font-size:12px;margin-top:4px;"></div>
+        </div>
+      </div>
+      <div class="tbl-body">${pending.length ? `<table><thead><tr><th>ছাত্র</th><th>বিল</th><th>টাকা</th><th>মাধ্যম</th><th>TrxID</th><th>জমার সময়</th><th>অবস্থা</th><th></th></tr></thead>
+        <tbody>${pending.map(c=>claimRow(c,true)).join("")}</tbody></table>` : `<div class="empty">কোনো অপেক্ষমাণ পেমেন্ট নেই।</div>`}</div>
+    </div>
+    <div class="arch" style="margin-top:16px;">
+      <div class="sec-head" style="margin:0 0 10px;"><div><h2 style="font-size:15px;">পূর্বের সিদ্ধান্ত</h2></div></div>
+      <div class="tbl-body">${done.length ? `<table><thead><tr><th>ছাত্র</th><th>বিল</th><th>টাকা</th><th>মাধ্যম</th><th>TrxID</th><th>জমার সময়</th><th>অবস্থা</th><th></th></tr></thead>
+        <tbody>${done.slice(0,50).map(c=>claimRow(c,false)).join("")}</tbody></table>` : `<div class="empty">এখনো কিছু নেই।</div>`}</div>
+    </div>`;
+}
+
+/* ============================ অ্যাক্টিভিটি লগ ============================ */
+function renderActivityLogTab(){
+  const log = db.activityLog || [];
+  return `
+    <div class="sec-head"><div class="badge">📝</div><div><h2>অ্যাক্টিভিটি লগ</h2><p>আয়-ব্যয়ের রশিদ/ভাউচার/হিসাবে যোগ ও মুছে ফেলার ইতিহাস (সর্বশেষ ${bn(ACTIVITY_LOG_MAX)}টি পর্যন্ত রাখা হয়)</p></div></div>
+    <p style="margin:0 0 16px;font-size:12.5px;color:var(--inkSoft);">লক্ষ্য করুন: এই সফটওয়্যারে একটিমাত্র গোপন কোড দিয়ে সবাই প্রবেশ করে, তাই কে করেছে তা আলাদাভাবে সনাক্ত করা সম্ভব নয় — শুধু কী পরিবর্তন হয়েছে ও কখন হয়েছে তা এখানে দেখা যাবে।</p>
+    <div class="arch">
+      <div class="tbl-toolbar">
+        <button class="btn ghost small" data-csv="activityLog">⬇ Excel/CSV এক্সপোর্ট</button>
+        <div></div>
+      </div>
+      <div class="tbl-body">${log.length ? `<table><thead><tr><th>তারিখ ও সময়</th><th>ধরন</th><th>বিবরণ</th></tr></thead>
+        <tbody>${log.map(l=>`<tr>
+          <td style="white-space:nowrap;">${fmtDate(l.at.slice(0,10))} — ${l.at.slice(11,16)}</td>
+          <td>${l.action==="যোগ" ? `<span style="color:var(--paid);font-weight:700;">➕ ${esc(l.action)}</span>` : `<span style="color:var(--due);font-weight:700;">🗑 ${esc(l.action)}</span>`}</td>
+          <td>${esc(l.summary)}</td>
+        </tr>`).join("")}</tbody></table>` : `<div class="empty">এখনো কোনো কার্যক্রম রেকর্ড হয়নি।</div>`}</div>
     </div>`;
 }
 
@@ -2037,12 +2443,47 @@ function ensureFirestore(){
     return firebase.firestore();
   }catch(e){ console.error(e); return null; }
 }
+// Firestore ব্যবহারের আগে সবসময় এই ফাংশনটি কল করে অ্যানোনিমাস অথেনটিকেশন নিশ্চিত করা হয়।
+// এটি সরাসরি ডেটাবেস URL/কনফিগ দিয়ে বাইরের কেউ কোনো টুল দিয়ে সরাসরি ডেটা পড়া/লেখার
+// সহজ প্রচেষ্টা ঠেকাতে সাহায্য করে — তবে প্রকৃত সুরক্ষা নির্ভর করে Firestore Security Rules-এর উপর
+// (নিচে "সেটআপ নির্দেশিকা"-তে দেওয়া নিয়মগুলো ফায়ারবেস কনসোলে বসাতে হবে)।
+async function ensureFirebaseAuth(){
+  if(typeof firebase === "undefined" || !firebase.auth){ return false; }
+  try{
+    if(firebase.auth().currentUser) return true;
+    await firebase.auth().signInAnonymously();
+    return true;
+  }catch(e){
+    console.error("Firebase auth failed:", e);
+    return false;
+  }
+}
+const FIRESTORE_SECURITY_RULES = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // শুধু সাইন-ইন করা (অ্যানোনিমাস হলেও) রিকোয়েস্ট থেকেই পড়া/লেখা যাবে —
+    // সাইন-ইন ছাড়া সরাসরি লিংক/কোড দিয়ে কেউ ডেটা দেখতে বা বদলাতে পারবে না।
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`;
 
 function renderOnlineSyncTab(){
   const cfg = getFirebaseConfig() || {};
   const lastSync = getLastSyncedAt();
+  const lastAutoBackup = getAutoLocalBackupAt();
   return `
     <div class="sec-head"><div class="badge">☁️</div><div><h2>অনলাইন সিঙ্ক ও অভিভাবক পোর্টাল</h2><p>এই তথ্যগুলো একবার সেট করলে অভিভাবক ঘরে বসেই ছাত্রের হাজিরা, ফলাফল ও বেতনের অবস্থা দেখতে পারবেন</p></div></div>
+
+    <div class="arch form-card">
+      <h3 style="margin:0 0 8px;color:var(--green);font-size:15px;">💾 ব্যাকআপ ব্যবস্থা</h3>
+      <p style="margin:0;font-size:13px;color:var(--inkSoft);line-height:1.8;">
+        প্রতিদিন প্রথমবার অ্যাপ খুললে উপরে একটা "আজকের ব্যাকআপ নিন" বার্তা দেখাবে — সেখানে এক ট্যাপ চাপলেই ফোনে ব্যাকআপ সংরক্ষিত হয়ে যাবে (সম্পূর্ণ নিঃশব্দ/স্বয়ংক্রিয় করা যায় না, কারণ অনেক ফোনে ব্যবহারকারীর সরাসরি চাপ ছাড়া অ্যাপ থেকে ফাইল সংরক্ষণ ব্লক হয়ে যায়)।
+        ${lastAutoBackup ? `সর্বশেষ ব্যাকআপ: ${fmtDate(lastAutoBackup.slice(0,10))}।` : "এখনো কোনো ব্যাকআপ নেওয়া হয়নি।"}
+        এছাড়া টপবারের <strong>"⬇ ব্যাকআপ / Drive / OneDrive"</strong> বাটনে চাপলে সরাসরি Google Drive বা OneDrive-এও একটা কপি পাঠাতে পারবেন — এটা সপ্তাহে অন্তত একবার করা ভালো, কারণ ফোনের নিজস্ব স্টোরেজে রাখা ব্যাকআপ ফোন হারালে/নষ্ট হলে সাথেই হারিয়ে যাবে।
+      </p>
+    </div>
 
     <div class="arch form-card">
       <p style="margin:0 0 14px;font-size:13px;color:var(--inkSoft);line-height:1.7;">
@@ -2074,12 +2515,23 @@ function renderOnlineSyncTab(){
       <h3 style="margin:0 0 10px;color:var(--green);font-size:16px;">সেটআপ নির্দেশিকা (একবার করতে হবে)</h3>
       <ol style="margin:0;padding-right:20px;font-size:13.5px;line-height:2;color:var(--ink);">
         <li><a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> এ গিয়ে Google অ্যাকাউন্ট দিয়ে লগইন করুন, "Add project" চেপে একটি প্রজেক্ট তৈরি করুন (নাম যা খুশি, যেমন madrasa-app)</li>
-        <li>প্রজেক্ট তৈরি হলে বাম পাশের মেনু থেকে <strong>Build → Firestore Database</strong> এ যান, "Create database" চাপুন, "Start in test mode" বেছে নিন (পরে নিরাপত্তা নিয়ম বদলাতে পারবেন)</li>
+        <li>প্রজেক্ট তৈরি হলে বাম পাশের মেনু থেকে <strong>Build → Firestore Database</strong> এ যান, "Create database" চাপুন, "Start in test mode" বেছে নিন (পরের ধাপে এই নিয়ম বদলে দেওয়া হবে)</li>
+        <li>এরপর বাম মেনু থেকে <strong>Build → Authentication</strong> এ যান, "Get started" চাপুন, তারপর "Sign-in method" ট্যাবে গিয়ে <strong>Anonymous</strong> অপশনটি "Enable" করুন — এটি ছাড়া সিঙ্ক কাজ করবে না</li>
         <li>এরপর প্রজেক্ট সেটিংসে (⚙️ আইকন → Project settings) নিচে "Your apps" অংশে ওয়েব আইকনে (&lt;/&gt;) ক্লিক করে একটি অ্যাপ যুক্ত করুন — এখানেই উপরের ৬টি তথ্য (apiKey, authDomain ইত্যাদি) পেয়ে যাবেন, কপি করে উপরের ফর্মে বসান</li>
         <li>উপরের ফর্মে তথ্য বসিয়ে "সংরক্ষণ করুন" চাপুন, তারপর "এখনই সিঙ্ক করুন" চাপুন</li>
         <li>এরপর নিচের <strong>guardian-portal.html</strong> ফাইলটি খুলে সেখানেও একই ৬টি তথ্য বসিয়ে সংরক্ষণ করুন, তারপর সেই ফাইলটি অনলাইনে হোস্ট করুন (নিচের ফাইলের ভেতরে বিস্তারিত ধাপ লেখা আছে) — এই লিংকটিই অভিভাবকদের দিন</li>
       </ol>
       <p style="margin:14px 0 0;font-size:12.5px;color:var(--due);">⚠️ যেহেতু কোনো লগইন-পাসওয়ার্ড ব্যবস্থা এখানে নেই, তাই এই তথ্য (Firebase config) কারো সাথে অপ্রয়োজনে শেয়ার করবেন না — এটি জানলে কেউ ডেটা দেখতে/পরিবর্তন করতে পারবে।</p>
+    </div>
+
+    <div class="arch form-card">
+      <h3 style="margin:0 0 10px;color:var(--green);font-size:16px;">🔒 নিরাপত্তা নিয়ম (Firestore Security Rules) — অবশ্যই করুন</h3>
+      <p style="margin:0 0 12px;font-size:13.5px;color:var(--ink);line-height:1.8;">
+        "Start in test mode" দিয়ে ডাটাবেস তৈরি করলে ৩০ দিন পর্যন্ত যেকেউ (এমনকি সাইন-ইন ছাড়াই) আপনার ডেটা পড়তে/বদলাতে পারে, এরপর সম্পূর্ণ বন্ধ হয়ে যায়। নিচের নিয়মটি কপি করে ফায়ারবেস কনসোলে <strong>Firestore Database → Rules</strong> ট্যাবে গিয়ে বসিয়ে "Publish" চাপুন — এতে শুধু সাইন-ইন করা (অ্যাপ থেকে) রিকোয়েস্টই ডেটা পড়তে/লিখতে পারবে।
+      </p>
+      <pre id="firestoreRulesText" style="background:#22281F;color:#E8D8AC;padding:14px;border-radius:10px;font-size:12.5px;overflow-x:auto;white-space:pre-wrap;direction:ltr;text-align:left;font-family:monospace;">${esc(FIRESTORE_SECURITY_RULES)}</pre>
+      <button class="btn ghost small" type="button" id="copyRulesBtn" style="margin-top:8px;">📋 নিয়মটি কপি করুন</button>
+      <p style="margin:12px 0 0;font-size:12px;color:var(--inkSoft);">মনে রাখবেন: এই অ্যাপে ব্যবহারকারীর পরিচয় যাচাই (login) নেই, শুধু অ্যানোনিমাস সাইন-ইন হয় — তাই এই নিয়ম সাধারণ/অনিচ্ছাকৃত অ্যাক্সেস ঠেকাবে, কিন্তু যিনি নিজেই Firebase কনফিগ কোড থেকে বের করে ইচ্ছাকৃতভাবে অ্যাক্সেস করতে চাইবেন তার বিরুদ্ধে সম্পূর্ণ সুরক্ষা দেবে না। সবচেয়ে গুরুত্বপূর্ণ হলো নিয়মিত ব্যাকআপ রাখা।</p>
     </div>`;
 }
 
@@ -2087,6 +2539,8 @@ async function syncToCloud(){
   const statusEl = document.getElementById("syncStatus");
   const cfg = getFirebaseConfig();
   if(!cfg){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">প্রথমে উপরে ফায়ারবেস তথ্য দিয়ে সংরক্ষণ করুন।</span>`; return; }
+  const authOk = await ensureFirebaseAuth();
+  if(!authOk){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">সাইন-ইন করা যায়নি। ফায়ারবেস কনসোলে Authentication → Sign-in method → Anonymous চালু করা আছে কিনা যাচাই করুন।</span>`; return; }
   const db2 = ensureFirestore();
   if(!db2){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">ফায়ারবেসের সাথে সংযোগ করা যায়নি। তথ্যগুলো ঠিক আছে কিনা যাচাই করুন এবং ইন্টারনেট সংযোগ পরীক্ষা করুন।</span>`; return; }
   if(statusEl) statusEl.innerHTML = `<span style="color:var(--inkSoft);">সিঙ্ক করা হচ্ছে... অপেক্ষা করুন।</span>`;
@@ -2157,6 +2611,15 @@ async function syncToCloud(){
       });
     });
 
+    const pcfg = getPaymentConfig();
+    if(pcfg.bkashNumber || pcfg.nagadNumber){
+      addOp(db2.collection("settings").doc("payment"), {
+        bkashNumber: pcfg.bkashNumber||"", bkashType: pcfg.bkashType||"personal",
+        nagadNumber: pcfg.nagadNumber||"", nagadType: pcfg.nagadType||"personal",
+        instructions: pcfg.instructions||""
+      });
+    }
+
     commits.push(batch.commit());
     await Promise.all(commits);
     const nowIso = new Date().toISOString();
@@ -2166,6 +2629,50 @@ async function syncToCloud(){
   }catch(err){
     console.error(err);
     if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">সিঙ্ক করতে সমস্যা হয়েছে: ${esc(err.message||String(err))}</span>`;
+  }
+}
+
+async function fetchPaymentClaimsFromCloud(){
+  const statusEl = document.getElementById("claimFetchStatus");
+  if(statusEl) statusEl.innerHTML = `<span style="color:var(--inkSoft);">যাচাই করা হচ্ছে...</span>`;
+  const cfg = getFirebaseConfig();
+  if(!cfg){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">প্রথমে "অনলাইন সিঙ্ক" পাতায় ফায়ারবেস তথ্য দিন।</span>`; return; }
+  const authOk = await ensureFirebaseAuth();
+  if(!authOk){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">সাইন-ইন করা যায়নি।</span>`; return; }
+  const db2 = ensureFirestore();
+  if(!db2){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">সংযোগ করা যায়নি।</span>`; return; }
+  try{
+    const snap = await db2.collection("paymentClaims").get();
+    if(snap.empty){ if(statusEl) statusEl.innerHTML = `<span style="color:var(--inkSoft);">নতুন কোনো দাবি নেই।</span>`; return; }
+    let added = 0;
+    const dels = [];
+    db.paymentClaims = db.paymentClaims || [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      const st = db.students.find(s=>s.sid===d.sid);
+      dels.push(doc.ref.delete());
+      if(!st){ return; }
+      const billKind = d.billType === "boarding" ? "boardingBills" : "fees";
+      const cfg2 = BILLING_CONFIGS[billKind];
+      const bill = db[cfg2.key].find(b => b.studentId===st.id && b.month===d.month && String(b.year)===String(d.year));
+      if(!bill) return;
+      const dup = db.paymentClaims.some(c => c.studentId===st.id && c.billKind===billKind && c.trxId===d.trxId);
+      if(dup) return;
+      db.paymentClaims.unshift({
+        id: uid(), studentId: st.id, billKind, billId: bill.id,
+        month: d.month, year: d.year, amount: d.amount,
+        method: d.method||"bkash", senderMobile: d.senderMobile||"", trxId: d.trxId||"",
+        submittedAt: d.submittedAt || new Date().toISOString(), status: "pending"
+      });
+      added++;
+    });
+    await Promise.all(dels);
+    saveDB();
+    if(statusEl) statusEl.innerHTML = `<span style="color:var(--paid);">✔ ${bn(added)}টি নতুন দাবি আনা হয়েছে।</span>`;
+    renderContent();
+  }catch(err){
+    console.error(err);
+    if(statusEl) statusEl.innerHTML = `<span style="color:var(--due);">আনতে সমস্যা হয়েছে: ${esc(err.message||String(err))}</span>`;
   }
 }
 
@@ -2180,6 +2687,7 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
       id:uid(), no:fd.get("no")||"", date:fd.get("date")||todayISO(),
       party:fd.get("party")||"", extra:fd.get("extra")||"", desc:fd.get("desc")||"", amount
     });
+    logActivity("যোগ", `${cfg.title}: ${fd.get("party")||"—"} — ${taka(amount)} (${fmtDate(fd.get("date")||todayISO())})`);
     saveDB(); renderContent(); return;
   }
   if(type==="students"){
@@ -2251,6 +2759,36 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     });
     renderContent();
     alert("ফায়ারবেস তথ্য সংরক্ষণ করা হয়েছে। এখন 'এখনই সিঙ্ক করুন' চাপুন।");
+    return;
+  }
+  if(type==="paymentConfig"){
+    savePaymentConfig({
+      bkashNumber: fd.get("bkashNumber")||"", bkashType: fd.get("bkashType")||"personal",
+      nagadNumber: fd.get("nagadNumber")||"", nagadType: fd.get("nagadType")||"personal",
+      instructions: fd.get("instructions")||""
+    });
+    renderContent();
+    alert("পেমেন্ট তথ্য সংরক্ষণ করা হয়েছে।");
+    return;
+  }
+  if(type==="guardianPaymentClaim"){
+    const combo = (fd.get("billCombo")||"").split("|");
+    const billKind = combo[0], billId = combo[1];
+    const cfg = BILLING_CONFIGS[billKind];
+    if(!cfg || !currentGuardianStudent) return;
+    const bill = db[cfg.key].find(b=>b.id===billId && b.studentId===currentGuardianStudent.id);
+    if(!bill){ alert("বিলটি খুঁজে পাওয়া যায়নি, আবার চেষ্টা করুন।"); return; }
+    if(!fd.get("trxId") || !fd.get("senderMobile")){ alert("ট্রানজেকশন আইডি ও প্রেরকের নম্বর দিন।"); return; }
+    db.paymentClaims = db.paymentClaims || [];
+    db.paymentClaims.unshift({
+      id: uid(), studentId: currentGuardianStudent.id, billKind, billId,
+      month: bill.month, year: bill.year, amount: bill.amount,
+      method: fd.get("method")||"bkash", senderMobile: fd.get("senderMobile"), trxId: fd.get("trxId").trim(),
+      submittedAt: new Date().toISOString(), status: "pending"
+    });
+    saveDB();
+    showLockOverlay("guardianResult");
+    alert("আপনার পেমেন্ট তথ্য জমা হয়েছে। মাদরাসা কর্তৃপক্ষ যাচাই করে নিশ্চিত করবেন।");
     return;
   }
   if(type==="attendanceDaily"){
@@ -2362,6 +2900,16 @@ const LETTERHEAD_TITLE = "বোররচর কাচারী বাজার 
 const LETTERHEAD_SUB = "ময়মনসিংহ সদর, ময়মনসিংহ";
 
 function copyMessageToClipboard(msg){
+  if(navigator.share){
+    navigator.share({ text: msg }).catch(err => {
+      if(err && err.name === "AbortError") return;
+      fallbackCopyMessage(msg);
+    });
+    return;
+  }
+  fallbackCopyMessage(msg);
+}
+function fallbackCopyMessage(msg){
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(msg).then(
       ()=>alert("মেসেজ কপি হয়েছে — এখন SMS বা WhatsApp-এ পেস্ট করে অভিভাবককে পাঠাতে পারবেন:\n\n"+msg),
@@ -2644,27 +3192,9 @@ function attendanceSheetTableHTML(kind){
       <span><span style="display:inline-block;width:12px;height:12px;background:var(--gold);border-radius:2px;vertical-align:middle;"></span> ছুটি</span>
     </div>`;
 }
-function printAttendanceRegister(kind){
-  let students, year, month, title, dataArr, idKey, personKey, idLabel, personLabel;
-  if(kind === "class"){
-    students = attendanceState.reportClassFilter === "all" ? db.students : studentsInClass(attendanceState.reportClassFilter);
-    year = attendanceState.reportYear; month = attendanceState.reportMonth;
-    dataArr = db.attendance; idKey = "admissionNo"; personKey = "studentId"; idLabel = "ভর্তি নং"; personLabel = "ছাত্র";
-    title = "ছাত্র হাজিরা শীট — " + (attendanceState.reportClassFilter==='all'?'সকল শ্রেণি':attendanceState.reportClassFilter) + " — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
-  } else if(kind === "teacher"){
-    students = db.teachers;
-    year = teacherAttendanceState.reportYear; month = teacherAttendanceState.reportMonth;
-    dataArr = db.teacherAttendance; idKey = "tid"; personKey = "teacherId"; idLabel = "আইডি নং"; personLabel = "শিক্ষক";
-    title = "শিক্ষকদের হাজিরা শীট — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
-  } else {
-    students = boardingAttendanceState.reportClassFilter === "all" ? boardingStudentsList() : boardingStudentsList().filter(s=>s.className===boardingAttendanceState.reportClassFilter);
-    year = boardingAttendanceState.reportYear; month = boardingAttendanceState.reportMonth;
-    dataArr = db.boardingAttendance; idKey = "admissionNo"; personKey = "studentId"; idLabel = "ভর্তি নং"; personLabel = "ছাত্র";
-    title = "বোর্ডিং হাজিরা শীট — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
-  }
-  if(!students.length){ alert(kind==="teacher" ? "কোনো শিক্ষক পাওয়া যায়নি।" : "কোনো ছাত্র পাওয়া যায়নি।"); return; }
+function buildRegisterTableBlock(students, dataArr, personKey, idKey, idLabel, personLabel, year, month, title, showClassCol){
+  if(!students.length) return "";
   const nDays = daysInMonth(year, month);
-  const showClassCol = kind !== "teacher";
   const dayHeaders = Array.from({length:nDays}, (_,i)=>`<th class="day">${bn(i+1)}</th>`).join("");
   const dayPresentTotals = new Array(nDays).fill(0);
   const dayAbsentTotals = new Array(nDays).fill(0);
@@ -2693,25 +3223,7 @@ function printAttendanceRegister(kind){
   const dayPresentFooter = dayPresentTotals.map(p=>`<td class="day" style="font-weight:700;">${bn(p)}</td>`).join("");
   const dayAbsentFooter = dayAbsentTotals.map(a=>`<td class="day" style="font-weight:700;">${bn(a)}</td>`).join("");
   const leadColspan = showClassCol ? 4 : 3;
-  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
-  <style>
-    body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;padding:14px;}
-    h1{font-size:15px;color:#14432A;text-align:center;margin:0 0 4px;}
-    .reg-logo{width:38px;height:38px;object-fit:contain;display:block;margin:0 auto 4px;}
-    p.sub{text-align:center;color:#5B6357;font-size:11px;margin:0 0 14px;}
-    table{border-collapse:collapse;table-layout:fixed;width:auto;}
-    th,td{border:1px solid #999;padding:2px 3px;text-align:center;font-size:12px;overflow:hidden;white-space:nowrap;}
-    th{background:#EEF2E8;font-weight:700;}
-    .serial{width:0.35in;}
-    .idc{width:0.5in;}
-    .name{width:2in;text-align:left;text-overflow:ellipsis;}
-    .cls{width:1in;}
-    .tot{width:1in;}
-    .day{width:0.22in;padding:2px 1px;}
-    .footer-label{text-align:right !important;font-weight:700;white-space:nowrap;}
-    .legend{margin-top:10px;font-size:11px;color:#5B6357;}
-    @media print{ body{padding:6mm;} th,td{font-size:10px;} }
-  </style></head><body>
+  return `<div class="reg-page">
     <img src="${LOGO_DATA_URI}" alt="লোগো" class="reg-logo">
     <h1>${esc(LETTERHEAD_TITLE)}</h1><p class="sub">${esc(LETTERHEAD_SUB)} — ${esc(title)}</p>
     <table>
@@ -2732,7 +3244,76 @@ function printAttendanceRegister(kind){
       </tbody>
     </table>
     <div class="legend">✓ (সবুজ) = উপস্থিত, ✗ (লাল) = অনুপস্থিত, ▮ (হলুদ ভরাট) = ছুটি, ফাঁকা = হাজিরা নেওয়া হয়নি</div>
-  </body></html>`;
+  </div>`;
+}
+const REGISTER_PRINT_STYLE = `
+    body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;padding:14px;}
+    h1{font-size:15px;color:#14432A;text-align:center;margin:0 0 4px;}
+    .reg-logo{width:38px;height:38px;object-fit:contain;display:block;margin:0 auto 4px;}
+    p.sub{text-align:center;color:#5B6357;font-size:11px;margin:0 0 14px;}
+    table{border-collapse:collapse;table-layout:fixed;width:auto;}
+    th,td{border:1px solid #999;padding:2px 3px;text-align:center;font-size:12px;overflow:hidden;white-space:nowrap;}
+    th{background:#EEF2E8;font-weight:700;}
+    .serial{width:0.35in;}
+    .idc{width:0.5in;}
+    .name{width:2in;text-align:left;text-overflow:ellipsis;}
+    .cls{width:1in;}
+    .tot{width:1in;}
+    .day{width:0.22in;padding:2px 1px;}
+    .footer-label{text-align:right !important;font-weight:700;white-space:nowrap;}
+    .legend{margin-top:10px;font-size:11px;color:#5B6357;}
+    .reg-page{page-break-after:always;}
+    .reg-page:last-child{page-break-after:auto;}
+    @media print{ body{padding:6mm;} th,td{font-size:10px;} }
+`;
+function printAttendanceRegister(kind){
+  let students, year, month, title, dataArr, idKey, personKey, idLabel, personLabel;
+  if(kind === "class"){
+    students = attendanceState.reportClassFilter === "all" ? db.students : studentsInClass(attendanceState.reportClassFilter);
+    year = attendanceState.reportYear; month = attendanceState.reportMonth;
+    dataArr = db.attendance; idKey = "admissionNo"; personKey = "studentId"; idLabel = "ভর্তি নং"; personLabel = "ছাত্র";
+    title = "ছাত্র হাজিরা শীট — " + (attendanceState.reportClassFilter==='all'?'সকল শ্রেণি':attendanceState.reportClassFilter) + " — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
+  } else if(kind === "teacher"){
+    students = db.teachers;
+    year = teacherAttendanceState.reportYear; month = teacherAttendanceState.reportMonth;
+    dataArr = db.teacherAttendance; idKey = "tid"; personKey = "teacherId"; idLabel = "আইডি নং"; personLabel = "শিক্ষক";
+    title = "শিক্ষকদের হাজিরা শীট — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
+  } else {
+    students = boardingAttendanceState.reportClassFilter === "all" ? boardingStudentsList() : boardingStudentsList().filter(s=>s.className===boardingAttendanceState.reportClassFilter);
+    year = boardingAttendanceState.reportYear; month = boardingAttendanceState.reportMonth;
+    dataArr = db.boardingAttendance; idKey = "admissionNo"; personKey = "studentId"; idLabel = "ভর্তি নং"; personLabel = "ছাত্র";
+    title = "বোর্ডিং হাজিরা শীট — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
+  }
+  if(!students.length){ alert(kind==="teacher" ? "কোনো শিক্ষক পাওয়া যায়নি।" : "কোনো ছাত্র পাওয়া যায়নি।"); return; }
+  const showClassCol = kind !== "teacher";
+  const block = buildRegisterTableBlock(students, dataArr, personKey, idKey, idLabel, personLabel, year, month, title, showClassCol);
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
+  <style>${REGISTER_PRINT_STYLE}</style></head><body>${block}</body></html>`;
+  const win = window.open("", "_blank");
+  if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ win.print(); }, 350);
+}
+
+function printAllAttendanceRegistersSeparately(){
+  const year = attendanceState.reportYear, month = attendanceState.reportMonth;
+  const classesWithStudents = CLASSES.filter(c => studentsInClass(c).length > 0);
+  if(!classesWithStudents.length && !boardingStudentsList().length){ alert("কোনো ছাত্র পাওয়া যায়নি।"); return; }
+  let blocks = "";
+  classesWithStudents.forEach(cls => {
+    const students = studentsInClass(cls);
+    const title = "ছাত্র হাজিরা শীট — " + cls + " — " + MONTHS_BN[Number(month)-1] + " " + bn(year);
+    blocks += buildRegisterTableBlock(students, db.attendance, "studentId", "admissionNo", "ভর্তি নং", "ছাত্র", year, month, title, false);
+  });
+  const boarders = boardingStudentsList();
+  if(boarders.length){
+    const bTitle = "বোর্ডিং হাজিরা শীট — " + MONTHS_BN[Number(boardingAttendanceState.reportMonth)-1] + " " + bn(boardingAttendanceState.reportYear);
+    blocks += buildRegisterTableBlock(boarders, db.boardingAttendance, "studentId", "admissionNo", "ভর্তি নং", "ছাত্র", boardingAttendanceState.reportYear, boardingAttendanceState.reportMonth, bTitle, true);
+  }
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>সকল হাজিরা শীট</title>
+  <style>${REGISTER_PRINT_STYLE}</style></head><body>${blocks}</body></html>`;
   const win = window.open("", "_blank");
   if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
   win.document.write(html);
@@ -2960,6 +3541,65 @@ function printCurrentTab(tab){
 }
 
 /* ============================ ব্যাকআপ এক্সপোর্ট/ইমপোর্ট ============================ */
+/* ============================ ব্যাকআপ রিমাইন্ডার ============================ */
+const LAST_BACKUP_KEY = "madrasaLastBackupAt_v1";
+const AUTO_LOCAL_BACKUP_KEY = "madrasaAutoLocalBackupAt_v1";
+const BACKUP_REMINDER_DAYS = 7;
+function getLastBackupAt(){ return localStorage.getItem(LAST_BACKUP_KEY) || ""; }
+function setLastBackupAt(iso){ localStorage.setItem(LAST_BACKUP_KEY, iso); }
+function daysSince(iso){
+  if(!iso) return Infinity;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+}
+function dismissBackupReminderToday(){
+  sessionStorage.setItem("madrasaBackupReminderDismissed", todayISO());
+}
+function backupReminderDismissedToday(){
+  return sessionStorage.getItem("madrasaBackupReminderDismissed") === todayISO();
+}
+function checkBackupReminder(){
+  const el = document.getElementById("backupReminderBanner");
+  if(!el) return;
+  const days = daysSince(getLastBackupAt());
+  if(days < BACKUP_REMINDER_DAYS || backupReminderDismissedToday()){ el.innerHTML = ""; return; }
+  const msgText = getLastBackupAt()
+    ? `Google Drive/OneDrive-এ সর্বশেষ ব্যাকআপ ${bn(days)} দিন আগে নেওয়া হয়েছে।`
+    : `এখনো Google Drive/OneDrive-এ কোনো ব্যাকআপ পাঠানো হয়নি।`;
+  el.innerHTML = `<div class="backup-banner">
+    <div>⚠️ <strong>${msgText}</strong> ফোন হারালে/নষ্ট হলে তথ্য বাঁচাতে Drive/OneDrive-এও নিয়মিত ব্যাকআপ পাঠান (মোবাইলে প্রতিদিন এমনিতেই সংরক্ষিত হচ্ছে)।</div>
+    <div class="bb-actions">
+      <button class="btn small" id="bannerBackupNow" type="button">⬇ এখনই পাঠান</button>
+      <button class="btn ghost small" id="bannerBackupDismiss" type="button">পরে মনে করিয়ে দিন</button>
+    </div>
+  </div>`;
+}
+function getAutoLocalBackupAt(){ return localStorage.getItem(AUTO_LOCAL_BACKUP_KEY) || ""; }
+function setAutoLocalBackupAt(iso){ localStorage.setItem(AUTO_LOCAL_BACKUP_KEY, iso); }
+function dismissDailyBackupToday(){
+  sessionStorage.setItem("madrasaDailyBackupDismissed", todayISO());
+}
+function dailyBackupDismissedToday(){
+  return sessionStorage.getItem("madrasaDailyBackupDismissed") === todayISO();
+}
+function checkDailyBackupPrompt(){
+  const el = document.getElementById("dailyBackupPromptBanner");
+  if(!el) return;
+  if(daysSince(getAutoLocalBackupAt()) < 1 || dailyBackupDismissedToday()){ el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="backup-banner" style="background:#E8F0E4;border-color:var(--green);">
+    <div>📥 <strong>আজকের ব্যাকআপটা এখনো নেওয়া হয়নি।</strong> নিচের বাটনে চাপলে ফোনে সংরক্ষিত হয়ে যাবে (মাত্র ১ ট্যাপ, প্রতিদিন একবার)।</div>
+    <div class="bb-actions">
+      <button class="btn small" id="dailyBackupNowBtn" type="button">✅ এখনই ব্যাকআপ নিন</button>
+      <button class="btn ghost small" id="dailyBackupDismissBtn" type="button">আজকের মতো বাদ দিন</button>
+    </div>
+  </div>`;
+}
+document.addEventListener("click", (e) => {
+  if(e.target.closest("#dailyBackupNowBtn")){ exportData(); setAutoLocalBackupAt(new Date().toISOString()); checkDailyBackupPrompt(); return; }
+  if(e.target.closest("#dailyBackupDismissBtn")){ dismissDailyBackupToday(); checkDailyBackupPrompt(); return; }
+  if(e.target.closest("#bannerBackupNow")){ exportData(); return; }
+  if(e.target.closest("#bannerBackupDismiss")){ dismissBackupReminderToday(); checkBackupReminder(); return; }
+});
+
 async function exportData(){
   const filename = "madrasa-backup-" + todayISO() + ".json";
   const blob = new Blob([JSON.stringify(db, null, 2)], {type:"application/json"});
@@ -2972,6 +3612,8 @@ async function exportData(){
         title:"মাদরাসা ব্যাকআপ",
         text:"মাদরাসা সফটওয়্যারের ব্যাকআপ ফাইল — Google Drive, OneDrive বা অন্য যেকোনো জায়গায় সংরক্ষণ করুন।"
       });
+      setLastBackupAt(new Date().toISOString());
+      checkBackupReminder();
       return;
     }
   }catch(e){
@@ -2986,6 +3628,8 @@ async function exportData(){
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  setLastBackupAt(new Date().toISOString());
+  checkBackupReminder();
 }
 function handleImportFile(file){
   if(!file) return;
@@ -3021,6 +3665,12 @@ document.addEventListener("click", function(e){
   if(delBtn){
     if(confirm("আপনি কি নিশ্চিত এই তথ্যটি মুছে ফেলতে চান?")){
       const coll = delBtn.dataset.delete, id = delBtn.dataset.id;
+      const ledgerKeys = Object.values(LEDGER_CONFIGS).map(c=>c.key);
+      if(ledgerKeys.includes(coll)){
+        const cfg = Object.values(LEDGER_CONFIGS).find(c=>c.key===coll);
+        const rec = db[coll].find(r=>r.id===id);
+        if(rec) logActivity("মুছে ফেলা", `${cfg.title}: ${rec.party||"—"} — ${taka(rec.amount)} (${fmtDate(rec.date||"")})`);
+      }
       db[coll] = db[coll].filter(r=>r.id!==id);
       saveDB(); renderContent();
     }
@@ -3035,9 +3685,59 @@ document.addEventListener("click", function(e){
     printCurrentTab(printBtn.dataset.print);
     return;
   }
+  const csvBtn = e.target.closest("[data-csv]");
+  if(csvBtn){
+    const key = csvBtn.dataset.csv;
+    if(key === "students"){ exportStudentsCSV(); return; }
+    if(key === "monthlyReport"){ exportMonthlyReportCSV(); return; }
+    if(key === "activityLog"){ exportActivityLogCSV(); return; }
+    if(key.startsWith("ledger:")){ exportLedgerCSV(key.split(":")[1]); return; }
+    return;
+  }
+  if(e.target.closest("#fetchCloudClaimsBtn")){ fetchPaymentClaimsFromCloud(); return; }
+  if(e.target.closest("#copyRulesBtn")){
+    const btn = e.target.closest("#copyRulesBtn");
+    navigator.clipboard.writeText(FIRESTORE_SECURITY_RULES).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = "✅ কপি হয়েছে";
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    }).catch(() => alert("কপি করা যায়নি, উপরের বক্স থেকে ম্যানুয়ালি কপি করুন।"));
+    return;
+  }
 
   const backfillBtn = e.target.closest('[data-action="backfill-ids"]');
   if(backfillBtn){ backfillStudentIds(); return; }
+  if(e.target.closest('[data-action="print-all-registers"]')){ printAllAttendanceRegistersSeparately(); return; }
+
+  const approveClaimBtn = e.target.closest('[data-action="approve-claim"]');
+  if(approveClaimBtn){
+    const claim = (db.paymentClaims||[]).find(c=>c.id===approveClaimBtn.dataset.id);
+    if(!claim){ return; }
+    const cfg = BILLING_CONFIGS[claim.billKind];
+    const bill = cfg ? db[cfg.key].find(b=>b.id===claim.billId) : null;
+    if(!bill){ alert("সংশ্লিষ্ট বিলটি আর নেই — সম্ভবত আগেই মুছে ফেলা হয়েছে।"); claim.status="rejected"; saveDB(); renderContent(); return; }
+    if(!confirm("নিজের বিকাশ/নগদ অ্যাপে "+taka(claim.amount)+" টাকা পাওয়া নিশ্চিত হয়েছেন তো? অনুমোদন করলে বিলটি 'পরিশোধিত' হয়ে যাবে।")) return;
+    bill.status = "পরিশোধিত";
+    bill.payDate = todayISO();
+    bill.trxId = claim.trxId;
+    bill.paymentMethod = claim.method;
+    claim.status = "verified";
+    const st = db.students.find(s=>s.id===claim.studentId);
+    logActivity("যোগ", `${cfg.title}: ${st?st.name:"—"} — ${taka(claim.amount)} (বিকাশ/নগদ, TrxID: ${claim.trxId}) — যাচাই করে পরিশোধিত করা হলো`);
+    saveDB();
+    renderContent();
+    return;
+  }
+  const rejectClaimBtn = e.target.closest('[data-action="reject-claim"]');
+  if(rejectClaimBtn){
+    const claim = (db.paymentClaims||[]).find(c=>c.id===rejectClaimBtn.dataset.id);
+    if(!claim) return;
+    if(!confirm("এই পেমেন্ট দাবিটি বাতিল করবেন? (যেমনঃ TrxID না মিললে বা টাকা না পেলে)")) return;
+    claim.status = "rejected";
+    saveDB();
+    renderContent();
+    return;
+  }
 
   const bulkImportBtn = e.target.closest('[data-action="bulk-import-students"]');
   if(bulkImportBtn){ bulkImportStudents(); return; }
@@ -3061,6 +3761,7 @@ document.addEventListener("click", function(e){
     if(row){
       row.status = row.status==="বাকি" ? "পরিশোধিত" : "বাকি";
       row.payDate = row.status==="পরিশোধিত" ? todayISO() : "";
+      if(row.status==="বাকি"){ row.trxId = ""; row.paymentMethod = ""; }
       saveDB(); renderContent();
     }
     return;
@@ -3084,7 +3785,8 @@ document.addEventListener("click", function(e){
       const st = row ? studentMap()[row.studentId] : null;
       if(row && st){
         const what = tab === "fees" ? "বেতন" : "বোর্ডিং বিল";
-        const msg = `প্রিয় অভিভাবক, ${st.name} (${st.className}, আইডি: ${st.sid||"-"}) এর ${row.month} ${bn(row.year)} মাসের ${what} ${taka(row.amount)} ${row.status==="পরিশোধিত"?"গ্রহণ করা হয়েছে। ধন্যবাদ।":"এখনো বাকি রয়েছে। অনুগ্রহ করে পরিশোধ করুন।"} — ${LETTERHEAD_TITLE}`;
+        const trxNote = (row.status==="পরিশোধিত" && row.trxId) ? ` (TrxID: ${row.trxId})` : "";
+        const msg = `প্রিয় অভিভাবক, ${st.name} (${st.className}, আইডি: ${st.sid||"-"}) এর ${row.month} ${bn(row.year)} মাসের ${what} ${taka(row.amount)} ${row.status==="পরিশোধিত"?"গ্রহণ করা হয়েছে। ধন্যবাদ।"+trxNote:"এখনো বাকি রয়েছে। অনুগ্রহ করে পরিশোধ করুন।"} — ${LETTERHEAD_TITLE}`;
         copyMessageToClipboard(msg);
       }
     } else if(tab === "income"){
@@ -3224,7 +3926,7 @@ document.addEventListener("click", function(e){
   if(e.target.closest("#changePinBtn")){ showLockOverlay("change"); return; }
   if(e.target.closest("#pinChangeCancel")){ hideLockOverlay(); return; }
   if(e.target.closest("#forgotPinLink")){ factoryResetForgotPin(); return; }
-  if(e.target.closest("#guardianViewLink")){ showLockOverlay("guardian"); return; }
+  if(e.target.closest("#guardianViewLink")){ showLockOverlay("guardian"); if(guardianLockSecondsLeft() > 0) startGuardianLockCountdown(); return; }
   if(e.target.closest("#guardianBackToLogin")){ showLockOverlay(getStoredPinHash() ? "unlock" : "set"); return; }
   if(e.target.closest("#guardianBack")){ currentGuardianStudent = null; showLockOverlay("guardian"); return; }
 
@@ -3288,7 +3990,7 @@ document.addEventListener("submit", function(e){
   if(type.startsWith("pin-")){ handlePinForm(type, fd); return; }
   if(type.startsWith("guardian-")){ handleGuardianForm(type, fd); return; }
   if(type === "students"){
-    const file = fd.get("photo");
+    const file = fd.get("photoCamera") && fd.get("photoCamera").size > 0 ? fd.get("photoCamera") : fd.get("photoGallery");
     if(file && file.size > 0){
       resizeImageToDataURL(file, 320).then(dataUrl => {
         handleFormSubmit(type, fd, form, dataUrl);
@@ -3307,6 +4009,23 @@ document.addEventListener("submit", function(e){
   form.reset();
 });
 
+document.addEventListener("change", function(e){
+  const photoInput = e.target.closest("[data-photo-input]");
+  if(photoInput){
+    const file = photoInput.files && photoInput.files[0];
+    if(!file) return;
+    // অন্য ইনপুটটি (ক্যামেরা/গ্যালারি) খালি করে দেওয়া হলো, যাতে জমা দেওয়ার সময় শুধু সর্বশেষ বাছাই করা ছবিটাই ব্যবহার হয়
+    document.querySelectorAll("[data-photo-input]").forEach(inp => { if(inp !== photoInput) inp.value = ""; });
+    const previewWrap = document.getElementById("studentPhotoPreviewWrap");
+    const previewImg = document.getElementById("studentPhotoPreview");
+    if(previewWrap && previewImg){
+      const reader = new FileReader();
+      reader.onload = () => { previewImg.src = reader.result; previewWrap.style.display = "block"; };
+      reader.readAsDataURL(file);
+    }
+    return;
+  }
+});
 document.addEventListener("input", function(e){
   const studentSearchEl = e.target.closest("[data-student-search]");
   if(studentSearchEl){
@@ -3429,7 +4148,7 @@ if("serviceWorker" in navigator && (location.protocol === "http:" || location.pr
     navigator.serviceWorker.register("sw.js").catch(function(){});
   });
 }
-if(!getStoredPinHash()){ showLockOverlay("set"); } else { showLockOverlay("unlock"); }
+if(!getStoredPinHash()){ showLockOverlay("set"); } else { showLockOverlay("unlock"); if(pinLockSecondsLeft() > 0) startPinLockCountdown(); }
 </script>
 </body>
 </html>
