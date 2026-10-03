@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="মাদরাসা অ্যাপ">
 <link rel="apple-touch-icon" href="app-icon-192.png">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@500;600;700&family=Hind+Siliguri:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@500;600;700&family=Hind+Siliguri:wght@400;500;600;700&family=Aref+Ruqaa:wght@400;700&display=swap">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -146,6 +146,7 @@
     <div class="side-head">
       <div id="sidebarLogoContainer" style="text-align:center;"></div>
       <div class="eyebrow">🌙 মাদরাসা ব্যবস্থাপনা</div>
+      <div id="sidebarBrandArabic" dir="rtl" lang="ar" style="font-family:'Aref Ruqaa','Amiri',serif;font-size:25px;font-weight:700;line-height:1.5;margin-bottom:2px;"></div>
       <h1 id="sidebarBrandTitle">বোররচর কাচারী বাজার ইসলামিয়া হুসাইনিয়া মাদরাসা</h1>
       <p id="sidebarBrandSub">ময়মনসিংহ সদর, ময়মনসিংহ</p>
     </div>
@@ -181,7 +182,8 @@ function defaultDB(){
     studentIdCounters:{}, attendance:[], boardingAttendance:[],
     libraryLoans:[], patronMembers:[], patronPayments:[],
     teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[],
-    activityLog:[], paymentClaims:[]
+    activityLog:[], paymentClaims:[],
+    notices:[], subjectList:[], routineConfig:{}, bookLinks:[]
   };
 }
 function loadDB(){
@@ -332,7 +334,7 @@ function lockScreenHTML(mode, errorMsg){
       <h2>ছাত্রের তথ্য খুঁজুন</h2>
       <p class="hint">সন্তানের ছাত্র আইডি নং ও ভর্তির সময় দেওয়া মোবাইল নম্বরটি দিন — কোনো গোপন কোডের প্রয়োজন নেই।</p>
       <form data-form="guardian-lookup">
-        <label class="field"><span>ছাত্র আইডি নং</span><input name="sid" autofocus required placeholder="যেমনঃ ২০২৬-০০০১"></label>
+        <label class="field"><span>ছাত্র আইডি নং</span><input name="sid" autofocus required placeholder="যেমনঃ ১"></label>
         <label class="field"><span>মোবাইল নম্বর</span><input name="mobile" required></label>
         ${err}
         ${gAttemptHint}
@@ -496,7 +498,7 @@ function handleGuardianForm(type, fd){
     if(guardianLockSecondsLeft() > 0){ showLockOverlay("guardian"); startGuardianLockCountdown(); return; }
     const sid = (fd.get("sid")||"").trim();
     const mobile = (fd.get("mobile")||"").trim();
-    const student = db.students.find(s => s.sid===sid && normalizeMobile(s.mobile)===normalizeMobile(mobile));
+    const student = db.students.find(s => sidKey(s.sid)===sidKey(sid) && normalizeMobile(s.mobile)===normalizeMobile(mobile));
     if(!student){
       registerFailedGuardianAttempt();
       if(guardianLockSecondsLeft() > 0){ showLockOverlay("guardian"); startGuardianLockCountdown(); return; }
@@ -672,11 +674,31 @@ function updateDobCalendarDOM(){
   const el = document.getElementById("dobCalContainer");
   if(el) el.innerHTML = renderDobCalendarHTML();
 }
+function sidAscii(x){ return String(x||"").trim().replace(/[০-৯]/g, d => String(BN_DIGITS.indexOf(d))); }
+function sidKey(x){ const a = sidAscii(x); return /^\d+$/.test(a) ? String(parseInt(a,10)) : a; }
 function generateStudentId(dateStr){
-  const year = dateStr ? dateStr.slice(0,4) : String(new Date().getFullYear());
-  db.studentIdCounters[year] = (db.studentIdCounters[year] || 0) + 1;
-  const seq = String(db.studentIdCounters[year]).padStart(4,"0");
-  return bn(year) + "-" + bn(seq);
+  let max = 0;
+  db.students.forEach(st => { const a = sidAscii(st.sid); if(/^\d+$/.test(a)) max = Math.max(max, parseInt(a,10)); });
+  db.studentIdCounters = db.studentIdCounters || {};
+  const next = Math.max(db.studentIdCounters.serial || 0, max) + 1;
+  db.studentIdCounters.serial = next;
+  return bn(next);
+}
+function hasOldFormatSids(){ return db.students.some(st => /^\d{4}-/.test(sidAscii(st.sid))); }
+function migrateStudentIds(silent){
+  const list = db.students.filter(st => st.sid);
+  const keyOf = st => { const a = sidAscii(st.sid); const m = a.match(/^(\d{4})-(\d+)$/); return m ? [parseInt(m[1],10), parseInt(m[2],10)] : [9999, parseInt(a,10)||0]; };
+  list.sort((x,y) => { const kx = keyOf(x), ky = keyOf(y); return (kx[0]-ky[0]) || (kx[1]-ky[1]) || String(x.date||"").localeCompare(String(y.date||"")); });
+  list.forEach((st,i) => { st.sid = bn(i+1); });
+  const noSid = db.students.filter(st => !st.sid);
+  db.studentIdCounters = { serial: list.length };
+  saveDB(); renderContent();
+  if(!silent) alert(bn(list.length) + " জন ছাত্রের আইডি নং ১ থেকে ক্রমানুসারে (সাল ছাড়া) পরিবর্তন করা হয়েছে।" + (noSid.length ? "\nআইডিবিহীন " + bn(noSid.length) + " জনের জন্য \"পুরনো ছাত্রদের আইডি তৈরি করুন\" বাটন চাপুন।" : ""));
+}
+function offerSidMigration(){
+  if(!hasOldFormatSids() || sessionStorage.getItem("sidMigrationAsked")) return;
+  sessionStorage.setItem("sidMigrationAsked","1");
+  if(confirm("ছাত্র আইডি নং এখন থেকে সাল ছাড়া শুধু ১, ২, ৩… সিরিয়ালে হবে।\n\nপুরনো ছাত্রদের আইডি (যেমনঃ ২০২৬-০০০১) কি এখনই নতুন সিরিয়ালে (১, ২, ৩…) বদলাবেন?\n\n⚠️ বদলালে অভিভাবকদের আগের আইডি আর কাজ করবে না। আগে ব্যাকআপ নিয়ে রাখা ভালো।")) migrateStudentIds();
 }
 function backfillStudentIds(){
   const missing = db.students.filter(s=>!s.sid).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
@@ -843,8 +865,11 @@ const NAV = [
   {id:"teacherAssignments", label:"শিক্ষকদের অ্যাসাইনমেন্ট", icon:"📌"},
   {id:"teacherAttendance", label:"শিক্ষকদের হাজিরা", icon:"🗓️"},
   {id:"teacherSalary", label:"শিক্ষকদের বেতন", icon:"💰"},
+  {id:"notices", label:"নোটিস", icon:"📢"},
   {id:"classRoutine", label:"ক্লাস রুটিন", icon:"📅"},
   {id:"examRoutine", label:"পরীক্ষার রুটিন", icon:"📋"},
+  {id:"seatPlan", label:"সিট প্ল্যান ও নম্বরপত্র", icon:"🪑"},
+  {id:"books", label:"কিতাব লাইব্রেরি", icon:"📚"},
   {id:"results", label:"ফলাফল", icon:"🎓"},
   {id:"patrons", label:"বদরী সদস্য", icon:"🤝"},
   {id:"monthlyReport", label:"মাসিক আয়-ব্যয়ের হিসাব", icon:"📊"},
@@ -1045,8 +1070,11 @@ function renderTab(tab){
   if(tab === "teacherAttendance") return renderTeacherAttendanceTab();
   if(tab === "teacherSalary") return renderTeacherSalaryTab();
   if(BILLING_CONFIGS[tab]) return renderBillingTab(tab);
+  if(tab === "notices") return renderNoticesTab();
   if(tab === "classRoutine") return renderClassRoutineTab();
   if(tab === "examRoutine") return renderExamRoutineTab();
+  if(tab === "seatPlan") return renderSeatPlanTab();
+  if(tab === "books") return renderBooksTab();
   if(tab === "results") return renderResultsTab();
   if(tab === "monthlyReport") return renderMonthlyReportTab();
   if(tab === "activityLog") return renderActivityLogTab();
@@ -1125,6 +1153,7 @@ function ledgerTableHTML(tab){
     <tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c.get(r)}</td>`).join("")}
       <td style="text-align:center;white-space:nowrap;"><span class="action-icons">
         ${showReceipt ? `<button class="del-btn" data-receipt="${tab}:${r.id}" title="${tab==='income'?'রশিদ প্রিন্ট':'ভাউচার প্রিন্ট'}">🧾</button>` : ""}
+        ${tab==="income" ? `<button class="del-btn" data-donation-receipt="${r.id}" title="অনুদান রশিদ প্রিন্ট">📜</button>` : ""}
         ${tab==="income" ? `<button class="del-btn" data-message="income" data-id="${r.id}" title="কনফার্মেশন মেসেজ কপি করুন">✉️</button>` : ""}
         <button class="del-btn" data-delete="${cfg.key}" data-id="${r.id}" title="মুছুন">🗑</button></span>
       </td></tr>`).join("")}
@@ -1145,6 +1174,8 @@ function renderLedgerTab(tab){
         <label class="field"><span>${cfg.noLabel}</span><input name="no" placeholder="নং"></label>
         <label class="field"><span>তারিখ</span><input type="date" name="date" value="${todayISO()}"></label>
         <label class="field"><span>${cfg.partyLabel}</span><input name="party" placeholder="নাম লিখুন" required></label>
+        ${tab==="income" ? `<label class="field"><span>দাতার পিতার নাম (অনুদান রশিদের জন্য)</span><input name="donorFather"></label>
+        <label class="field"><span>দাতার ঠিকানা (অনুদান রশিদের জন্য)</span><input name="donorAddress"></label>` : ""}
         ${cfg.extraLabel ? `<label class="field"><span>${cfg.extraLabel}</span><input name="extra"></label>` : ""}
         <label class="field" style="grid-column:span ${cfg.extraLabel?4:2};"><span>বিবরণ</span><input name="desc" placeholder="বিস্তারিত বিবরণ"></label>
         <label class="field"><span>${cfg.amountLabel}</span><input type="number" name="amount" step="0.01" required></label>
@@ -1155,6 +1186,7 @@ function renderLedgerTab(tab){
       <div class="tbl-toolbar">
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn ghost small" data-print="${tab}">🖨 প্রিন্ট করুন</button>
+          ${tab==="income" ? `<button class="btn ghost small" data-action="print-blank-donation">📜 ফাঁকা অনুদান রশিদ প্রিন্ট (রশিদ বই)</button>` : ""}
           <button class="btn ghost small" data-csv="ledger:${tab}">⬇ Excel/CSV এক্সপোর্ট</button>
         </div>
         <div class="search-box"><input placeholder="খুঁজুন..." data-search="${tab}" value="${esc(searchState[tab]||'')}"><span class="ic">🔍</span></div>
@@ -1200,6 +1232,7 @@ function renderStudentsTab(){
         : `<p style="margin:0 0 14px;font-size:13px;color:var(--inkSoft);">ছাত্র ভর্তি করলে সিস্টেম স্বয়ংক্রিয়ভাবে একটি স্থায়ী <strong>ছাত্র আইডি নং</strong> তৈরি করে দেবে (বছর-ক্রমিক আকারে), যা তালিকায় ও বেতন/বোর্ডিং/ফলাফল নির্বাচনে দেখা যাবে।</p>`}
       <form class="grid" data-form="students">
         <label class="field"><span>ভর্তি নং (ঐচ্ছিক)</span><input name="admissionNo" value="${editing?esc(editing.admissionNo||''):''}"></label>
+        <label class="field"><span>সিট নং (ঐচ্ছিক)</span><input name="seatNo" value="${editing?esc(editing.seatNo||''):''}"></label>
         <label class="field"><span>ছাত্রের নাম</span><input name="name" value="${editing?esc(editing.name):''}" required></label>
         <label class="field"><span>পিতার নাম</span><input name="fatherName" value="${editing?esc(editing.fatherName||''):''}"></label>
         <label class="field"><span>জন্মতারিখ</span>
@@ -1257,6 +1290,7 @@ function renderStudentsTab(){
           <button class="btn ghost small" data-print="students">🖨 প্রিন্ট করুন</button>
           <button class="btn ghost small" data-print="idCards">🪪 আইডি কার্ড প্রিন্ট করুন</button>
           <button class="btn ghost small" data-action="print-all-admission-forms">📄 সব ছাত্রের ভর্তি ফরম প্রিন্ট</button>
+          ${hasOldFormatSids() ? `<button class="btn ghost small" data-action="migrate-sids">🔢 আইডি নং সিরিয়ালে বদলান (সাল বাদ)</button>` : ""}
           <button class="btn ghost small" data-action="backfill-ids">🔄 পুরনো ছাত্রদের আইডি তৈরি করুন</button>
           <button class="btn ghost small" data-csv="students">⬇ Excel/CSV এক্সপোর্ট</button>
         </div>
@@ -1330,29 +1364,260 @@ function renderBillingTab(tab){
     </div>`;
 }
 
+/* ============================ ড্রপডাউন সহায়ক (রুটিন ও নোটিস) ============================ */
+const DEFAULT_SUBJECTS = ["কোরআন তেলাওয়াত","কোরআন তেলাওয়াত ও ইয়াদ করা","তাজবীদ","আমপারা ও তাজবীদ","নূরানী কায়দা","তরীকায়ে তা'লীম ও কায়েদা","উর্দু কায়দা","এসো আরবী শিখি","তালিমুল ইসলাম","ইসলামী তাহজীব","দোয়া ও হাদিস-মাসয়ালা","বাংলা","বাংলা সাহিত্য","বাংলা সাহিত্য ও ব্যাকরণ","অংক","গণিত","ইংরেজী","ইতিহাস ও ভূগোল","ফার্সি পহেলী","হিফজুল কোরআন","মাসায়েল","মিযানুস সরফ","ইলমুস সরফ","ইলমুস সীগাহ","নাহবেমীর","হেদায়াতুন নাহু","শরহে মিআতু আমেল","তাইসীরুল মানতিক","সহজ উসুলে ফেকহ","আল-ফিকহুল মুয়াসসার","নূরুল ঈযাহ","রওযাতুল আদব","সীরাতে খাতামুল আম্বিয়া","খিলাফতে রাশেদা","গুলিস্তাঁ","বেহেশতী গাওহার","করীমা ও পান্দেনামা","তারজামাতুল কোরআন","যাদুত তালিবীন ও কাসাসুন নাবিয়্যীন","তারিখুল ইসলাম ও তাজবীদ"];
+const EXAM_NAME_DEFAULTS = ["১ম সাময়িক পরীক্ষা","২য় সাময়িক পরীক্ষা","মাসিক পরীক্ষা","অর্ধবার্ষিক পরীক্ষা","বার্ষিক পরীক্ষা","মৌখিক পরীক্ষা"];
+const SESSION_OPTIONS = ["সকাল","বিকাল","দুপুর","সন্ধ্যা"];
+const DEFAULT_PERIOD_TIMES = ["১০.০০-১০.৪০","১০.৪০-১১.২০","১১.২০-১২.০০","১২.০০-১২.৪০","২.২০-৩.০০","৩.০০-৩.৪০","৩.৪০-৪.২০",""];
+const PERIOD_LABELS = ["১ম ঘণ্টা","২য় ঘণ্টা","৩য় ঘণ্টা","৪র্থ ঘণ্টা","৫ম ঘণ্টা","৬ষ্ঠ ঘণ্টা","৭ম ঘণ্টা","৮ম ঘণ্টা"];
+const BN_WEEKDAYS = ["রবিবার","সোমবার","মঙ্গলবার","বুধবার","বৃহস্পতিবার","শুক্রবার","শনিবার"];
+
+function routineCfg(){
+  const c = db.routineConfig || {};
+  const v = (k, d) => (c[k] === undefined ? d : c[k]);
+  return {
+    periods: (Array.isArray(c.periods) && c.periods.length === 8) ? c.periods : DEFAULT_PERIOD_TIMES.slice(),
+    classTitle: v("classTitle", "ক্লাস রুটিন"),
+    classYearText: v("classYearText", "১৪৪৭-৪৮ হিঃ ২০২৬-২৭ ইং"),
+    examYearText: v("examYearText", "১৪৪৮ হিজরী/২০২৬ ইং"),
+    examNote: v("examNote", ""),
+    signLeftTitle: v("signLeftTitle", "নাযেমে তা'লীমাতের স্বাক্ষর"),
+    signLeftName: v("signLeftName", ""),
+    signRightTitle: v("signRightTitle", "মুহতামিম সাহেবের স্বাক্ষর"),
+    signRightName: v("signRightName", ""),
+    extraClasses: Array.isArray(c.extraClasses) ? c.extraClasses : []
+  };
+}
+function allClassNames(){
+  const extra = routineCfg().extraClasses;
+  return [...CLASSES, ...extra.filter(x => !CLASSES.includes(x))];
+}
+function classOptionsHTML(sel, withNew){
+  return allClassNames().map(c => `<option ${c===sel?"selected":""}>${esc(c)}</option>`).join("") +
+    (withNew === false ? "" : `<option value="__new__">➕ নতুন শ্রেণি যোগ করুন…</option>`);
+}
+const CLASS_BOOK_RULES = [
+  [/দাওরা/, ["বুখারী শরীফ","মুসলিম শরীফ","তিরমিযী শরীফ","আবু দাউদ শরীফ","নাসায়ী শরীফ","ইবনে মাজাহ","তাহাবী শরীফ","মুয়াত্তা মালিক","মুয়াত্তা মুহাম্মদ","শামায়েলে তিরমিযী"]],
+  [/জালালাইন/, ["জালালাইন শরীফ","মিশকাত শরীফ","হেদায়া","শরহে আকাইদ","নুখবাতুল ফিকার","মুসাল্লামুস সুবূত","সিরাজী (ফারায়েজ)"]],
+  [/বেকায়া/, ["শরহে বেকায়া","নূরুল আনওয়ার","উসূলুশ শাশী","কুতবী","মীবুযী","মাকামাতে হারীরী","নফহাতুল আরব"]],
+  [/কাফিয়া/, ["কাফিয়া","শরহে জামী","কুদূরী","কানযুদ দাকাইক","শরহে তাহযীব","আল-ফাওযুল কাবীর","দুরূসুল বালাগাহ"]],
+  [/হেদায়াত/, ["হেদায়াতুন নাহু","ইলমুস সীগাহ","খিলাফতে রাশেদা","নূরুল ঈযাহ","যাদুত তালিবীন ও কাসাসুন নাবিয়্যীন","তারজামাতুল কুরআন","তাইসীরুল মানতিক","সহজ উসুলে ফেকহ"]],
+  [/নাহবে/, ["নাহবেমীর","শরহে মিআতু আমেল","ইলমুস সরফ","রওযাতুল আদব","গুলিস্তাঁ","আল-ফিকহুল মুয়াসসার","সীরাতে খাতামুল আম্বিয়া"]],
+  [/মিজান|মীযান|মিযান/, ["মীযান ও মুনশাইব (ইলমুস সরফ)","এসো আরবী শিখি","সাফওয়াতুল মাসাদির","বাকূরাতুল আদব","তারিখুল ইসলাম ও তাজবীদ","করীমা ও পান্দেনামা","বেহেশতী গাওহার","আত-তারীক ইলাল আরাবিয়্যাহ","বাংলা সাহিত্য","গণিত","ইংরেজী"]],
+  [/তাইসীর/, ["তাইসীরুল মুবতাদী","ফার্সী পহেলী","উর্দু কায়দা","কোরআন তেলাওয়াত ও ইয়াদ করা","তালিমুল ইসলাম","ইসলামী তাহজীব","বাংলা সাহিত্য ও ব্যাকরণ","অংক","ইতিহাস ও ভূগোল"]],
+  [/উর্দূ|উর্দু/, ["উর্দু কায়দা (পহেলী ও দুসরী)","এসো আরবী শিখি","কোরআন তেলাওয়াত ও ইয়াদ করা","তালিমুল ইসলাম","ইসলামী তাহজীব","বাংলা সাহিত্য","ইংরেজী","অংক","ইতিহাস ও ভূগোল"]],
+  [/বিশেষ/, ["তা'লীমুল ইসলাম","উর্দু কায়দা ও পহেলী","আত-তারীক ইলাল আরাবিয়্যাহ","তিলাওয়াতুল কুরআন","বাংলা","ইংরেজী","অংক","ইতিহাস ও ভূগোল"]],
+  [/হিফজ/, ["হিফজুল কোরআন","তাজবীদ","মাসায়েল"]],
+  [/নার্সার/, ["তরীকায়ে তা'লীম ও কায়েদা","বাংলা","অংক","ইংরেজী","দোয়া ও হাদিস-মাসয়ালা"]],
+  [/নূরানী/, ["নূরানী কায়দা","আমপারা ও তাজবীদ","বাংলা","অংক","ইংরেজী","দোয়া ও হাদিস-মাসয়ালা"]],
+  [/নাজেরা/, ["কোরআন শরীফ (নাজেরা) ও তাজবীদ","বাংলা","অংক","ইংরেজী","দোয়া ও হাদিস-মাসয়ালা"]],
+  [/প্রথম|দ্বিতীয়|তৃতীয়|চতুর্থ|পঞ্চম/, ["কোরআন শরীফ (নাজেরা) ও তাজবীদ","বাংলা","অংক","ইংরেজী","দোয়া ও হাদিস-মাসয়ালা","ইতিহাস ও ভূগোল","তালিমুল ইসলাম"]]
+];
+function booksForClass(cls){
+  if(!cls) return [];
+  for(const [re, list] of CLASS_BOOK_RULES){ if(re.test(cls)) return list; }
+  return [];
+}
+function subjectOptionsHTML(sel, cls){
+  const extra = [...new Set([...DEFAULT_SUBJECTS, ...(db.subjectList || [])])];
+  const opt = x => `<option ${x===sel?"selected":""}>${esc(x)}</option>`;
+  let html = `<option value="">— বিষয়/বই নির্বাচন করুন —</option>`;
+  const own = booksForClass(cls);
+  const shown = new Set();
+  if(cls && own.length){
+    html += `<optgroup label="${esc(cls)} — শ্রেণির বইয়ের তালিকা">${own.map(opt).join("")}</optgroup>`;
+    own.forEach(x => shown.add(x));
+  } else {
+    allClassNames().forEach(c => {
+      const l = booksForClass(c);
+      if(l.length){ html += `<optgroup label="${esc(c)}">${l.map(opt).join("")}</optgroup>`; l.forEach(x => shown.add(x)); }
+    });
+  }
+  const rest = extra.filter(x => !shown.has(x));
+  if(rest.length) html += `<optgroup label="অন্যান্য বিষয়">${rest.map(opt).join("")}</optgroup>`;
+  return html + `<option value="__new__">➕ নতুন বিষয় যোগ করুন…</option>`;
+}
+function teacherOptionsHTML(sel){
+  return `<option value="">— শিক্ষক (ঐচ্ছিক) —</option>` +
+    (db.teachers || []).map(t => `<option ${t.name===sel?"selected":""}>${esc(t.name)}</option>`).join("");
+}
+function periodOptionsHTML(sel){
+  return routineCfg().periods.map((t, i) => `<option value="${i+1}" ${String(sel)===String(i+1)?"selected":""}>${PERIOD_LABELS[i]}${t?` (${esc(t)})`:""}</option>`).join("");
+}
+function examNameOptionsHTML(sel){
+  const all = [...new Set([...EXAM_NAME_DEFAULTS, ...allExamNames()])];
+  return all.map(n => `<option ${n===sel?"selected":""}>${esc(n)}</option>`).join("") +
+    `<option value="__new__">➕ নতুন পরীক্ষার নাম…</option>`;
+}
+function fmtDateSlash(iso){
+  if(!iso) return "";
+  const [y,m,d] = iso.split("-");
+  return bn(d + "/" + m + "/" + y);
+}
+function fmtDateDayMonth(iso){
+  const [y,m,d] = iso.split("-");
+  return bn(parseInt(d,10)) + " " + MONTHS_BN[parseInt(m,10)-1];
+}
+function weekdayBn(iso){
+  const d = new Date(iso + "T00:00:00");
+  return isNaN(d) ? "" : BN_WEEKDAYS[d.getDay()];
+}
+
+/* রুটিন প্রিন্টের সাধারণ কাঠামো (ল্যান্ডস্কেপ) */
+function printRoutineDocument(titleLine, bodyHTML, noteHTML, signHTML, orientation){
+  const logo = getBrandLogo();
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(titleLine)}</title>
+  <style>
+    @page{size:A4 ${orientation||"landscape"};margin:9mm 10mm;}
+    ${FANCY_HEADER_CSS}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#000;margin:0;}
+    .hd{position:relative;text-align:center;margin-bottom:10px;min-height:30mm;}
+    .hd img.lg{position:absolute;left:2mm;top:2mm;width:24mm;height:24mm;object-fit:contain;}
+    .hd h1{margin:0;font-size:27px;line-height:1.3;font-weight:800;}
+    .hd .tt{margin-top:4px;font-size:20px;font-weight:700;}
+    table.rt{width:100%;border-collapse:collapse;table-layout:fixed;}
+    .rt th,.rt td{border:2px solid #000;padding:12px 4px;text-align:center;vertical-align:middle;font-size:17px;line-height:1.4;word-break:break-word;}
+    .rt th{font-size:18px;font-weight:700;padding:8px 4px;}
+    .rt td small{display:block;font-size:12.5px;color:#333;margin-top:2px;}
+    .rt td.first{font-weight:700;font-size:18px;}
+    .rt .sym{font-size:26px;line-height:1;}
+    .rt th.corner{position:relative;height:56px;background:linear-gradient(to top right,transparent calc(50% - 1px),#000 50%,transparent calc(50% + 1px));}
+    .rt th.corner span{position:absolute;font-size:14px;}
+    .rt th.corner .a{right:8px;top:4px;} .rt th.corner .b{left:8px;bottom:4px;}
+    .note{margin-top:8px;font-size:15px;}
+    .signs{display:flex;justify-content:space-between;margin-top:34px;font-size:15px;}
+    .signs div{line-height:1.7;}
+    @media screen{ body{padding:12px;} }
+  </style></head><body>
+    ${fancyHeaderHTML({ title: titleLine, compact: true })}
+    ${bodyHTML}
+    ${noteHTML || ""}
+    ${signHTML || ""}
+  </body></html>`;
+  const win = window.open("", "_blank");
+  if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+  safePrint(win);
+}
+function routineSignHTML(){
+  const c = routineCfg();
+  const one = (name, title, align) => `<div style="text-align:${align};">${name?`(${esc(name)})<br>`:"<br>"}${esc(title)}</div>`;
+  return `<div class="signs">${one(c.signLeftName, c.signLeftTitle, "left")}${one(c.signRightName, c.signRightTitle, "right")}</div>`;
+}
+
 /* ============================ ক্লাস রুটিন ============================ */
 function classRoutineTableHTML(){
   const rows = db.classRoutine;
   if(!rows.length) return `<div class="empty">এখনো কোনো রুটিন যোগ করা হয়নি।</div>`;
-  return `<table><thead><tr><th>বার</th><th>সময়</th><th>শ্রেণি</th><th>বিষয়</th><th>শিক্ষক</th><th></th></tr></thead>
-    <tbody>${rows.map(r=>`<tr><td>${esc(r.day)}</td><td>${esc(r.time)}</td><td>${esc(r.className)}</td><td>${esc(r.subject)}</td><td>${esc(r.teacher||"-")}</td>
+  return `<table><thead><tr><th>বার</th><th>ঘণ্টা</th><th>সময়</th><th>শ্রেণি</th><th>বিষয়</th><th>শিক্ষক</th><th></th></tr></thead>
+    <tbody>${rows.map(r=>`<tr><td>${esc(r.day||"প্রতিদিন")}</td><td>${r.period?esc(PERIOD_LABELS[r.period-1]||""):"-"}</td><td>${esc(r.time||"-")}</td><td>${esc(r.className)}</td><td>${esc(r.subject)}</td><td>${esc(r.teacher||"-")}</td>
       <td style="text-align:center;"><button class="del-btn" data-delete="classRoutine" data-id="${r.id}">🗑</button></td></tr>`).join("")}</tbody></table>`;
 }
+function classGridModel(mode, day){
+  const cfg = routineCfg();
+  const entries = db.classRoutine.filter(r => r.period && (r.day || "প্রতিদিন") === day);
+  const cols = [];
+  for(let i = 1; i <= 8; i++){
+    if(cfg.periods[i-1] || entries.some(r => Number(r.period) === i)) cols.push(i);
+  }
+  let keys;
+  if(mode === "teacher"){
+    keys = [...new Set(entries.map(r => r.teacher || "(শিক্ষক নির্ধারিত নেই)"))].sort((a,b) => a.localeCompare(b, "bn"));
+  } else {
+    const present = new Set(entries.map(r => r.className));
+    keys = allClassNames().filter(c => present.has(c));
+  }
+  return { cfg, entries, cols, keys };
+}
+function classRoutineGridHTML(mode, day){
+  const { cfg, entries, cols, keys } = classGridModel(mode, day);
+  if(!entries.length) return `<div class="empty">এই বারের জন্য ঘণ্টাভিত্তিক কোনো রুটিন নেই। উপরের ফর্ম থেকে যোগ করুন।</div>`;
+  const first = mode === "teacher" ? "শিক্ষক মহোদয়ের নাম" : "দরস / শ্রেণি";
+  const head1 = `<tr><th style="width:15%">${first}</th>${cols.map(i=>`<th>${PERIOD_LABELS[i-1]}</th>`).join("")}</tr>`;
+  const head2 = `<tr><th>সময়</th>${cols.map(i=>`<th style="font-weight:600;">${esc(cfg.periods[i-1]||"")}</th>`).join("")}</tr>`;
+  const body = keys.map(k => {
+    const cells = cols.map(i => {
+      const list = entries.filter(r => Number(r.period) === i && (mode === "teacher" ? (r.teacher || "(শিক্ষক নির্ধারিত নেই)") === k : r.className === k));
+      if(!list.length) return `<td></td>`;
+      return `<td>${list.map(r => mode === "teacher"
+        ? `${esc(r.subject)}<small>${esc(r.className)}</small>`
+        : esc(r.subject)).join("<hr style='border:0;border-top:1px solid #999;margin:4px 0'>")}</td>`;
+    }).join("");
+    return `<tr><td class="first">${esc(k)}</td>${cells}</tr>`;
+  }).join("");
+  return `<table class="rt"><thead>${head1}${head2}</thead><tbody>${body}</tbody></table>`;
+}
+function printClassRoutine(mode){
+  const day = miscState.routineDay || "প্রতিদিন";
+  const cfg = routineCfg();
+  const model = classGridModel(mode, day);
+  if(!model.entries.length){ alert("এই বারের জন্য ঘণ্টাভিত্তিক কোনো রুটিন নেই।"); return; }
+  const title = `${cfg.classTitle}${mode==="teacher"?" (শিক্ষকভিত্তিক)":""} ${cfg.classYearText}${day!=="প্রতিদিন"?" — "+day:""}`.trim();
+  printRoutineDocument(title, classRoutineGridHTML(mode, day), "", "", "landscape");
+}
+function routineSettingsPanelHTML(kind){
+  const c = routineCfg();
+  const inp = (name, label, val, ph, span) => `<label class="field" ${span?`style="grid-column:span ${span};"`:""}><span>${label}</span><input name="${name}" value="${esc(val)}" placeholder="${esc(ph||"")}"></label>`;
+  if(kind === "class"){
+    return `<details class="arch form-card" style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">⚙️ ঘণ্টার সময় ও রুটিনের শিরোনাম সেটিং</summary>
+      <form class="grid" data-form="routineConfig" style="grid-template-columns:repeat(4,1fr);margin-top:10px;">
+        ${c.periods.map((t,i)=>inp("p"+(i+1), PERIOD_LABELS[i]+" এর সময়", t, "যেমনঃ ১০.০০-১০.৪০")).join("")}
+        ${inp("classTitle","রুটিনের শিরোনাম",c.classTitle,"",2)}
+        ${inp("classYearText","সাল (হিজরী/ইংরেজী)",c.classYearText,"",2)}
+        <div class="btn-end"><button class="btn" type="submit">💾 সংরক্ষণ</button></div>
+      </form></details>`;
+  }
+  return `<details class="arch form-card" style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">⚙️ রুটিন প্রিন্টের সেটিং (সাল, বিঃ দ্রঃ, স্বাক্ষর)</summary>
+    <form class="grid" data-form="routineConfig" style="grid-template-columns:repeat(2,1fr);margin-top:10px;">
+      ${inp("examYearText","সাল (হিজরী/ইংরেজী)",c.examYearText,"",2)}
+      ${inp("examNote","বিঃ দ্রঃ (ঐচ্ছিক)",c.examNote,"যেমনঃ বিঃ দ্রঃ প্রতিদিন সকাল ৯.৩০ ঘটিকা হইতে ১২.৩০ ঘটিকা পর্যন্ত চলিবে।",2)}
+      ${inp("signLeftName","বাম পাশের স্বাক্ষরকারীর নাম",c.signLeftName,"")}
+      ${inp("signLeftTitle","বাম পাশের পদবী",c.signLeftTitle,"")}
+      ${inp("signRightName","ডান পাশের স্বাক্ষরকারীর নাম",c.signRightName,"")}
+      ${inp("signRightTitle","ডান পাশের পদবী",c.signRightTitle,"")}
+      <div class="btn-end"><button class="btn" type="submit">💾 সংরক্ষণ</button></div>
+    </form></details>`;
+}
 function renderClassRoutineTab(){
+  const day = miscState.routineDay || "প্রতিদিন";
+  const mode = miscState.routineMode || "class";
   return `
-    <div class="sec-head"><div class="badge">📅</div><div><h2>ক্লাস রুটিন</h2><p>শ্রেণিভিত্তিক দৈনিক ক্লাসের সময়সূচি</p></div></div>
+    <div class="sec-head"><div class="badge">📅</div><div><h2>ক্লাস রুটিন</h2><p>ড্রপডাউন থেকে বেছে ঘণ্টাভিত্তিক রুটিন তৈরি ও প্রিন্ট করুন</p></div></div>
     <div class="arch form-card">
-      <form class="grid" data-form="classRoutine" style="grid-template-columns:repeat(5,1fr);">
-        <label class="field"><span>শ্রেণি</span><select name="className">${CLASSES.map(c=>`<option>${c}</option>`).join("")}</select></label>
-        <label class="field"><span>বার</span><select name="day">${DAYS.map(d=>`<option>${d}</option>`).join("")}</select></label>
-        <label class="field"><span>সময়</span><input name="time" placeholder="যেমনঃ ৯:০০ - ৯:৪৫"></label>
-        <label class="field"><span>বিষয়</span><input name="subject" required></label>
-        <label class="field"><span>শিক্ষক</span><input name="teacher"></label>
+      <form class="grid" data-form="classRoutine" style="grid-template-columns:repeat(3,1fr);">
+        <label class="field"><span>শ্রেণি</span><select name="className" data-addable="class">${classOptionsHTML("")}</select></label>
+        <label class="field"><span>বার</span><select name="day"><option>প্রতিদিন</option>${DAYS.map(d=>`<option>${d}</option>`).join("")}</select></label>
+        <label class="field"><span>ঘণ্টা</span><select name="period">${periodOptionsHTML(1)}</select></label>
+        <label class="field" style="grid-column:span 2;"><span>বিষয়/বই (শ্রেণি অনুযায়ী তালিকা)</span><select name="subject" data-addable="subject" required>${subjectOptionsHTML("", allClassNames()[0])}</select></label>
+        <label class="field"><span>শিক্ষক</span><select name="teacher">${teacherOptionsHTML("")}</select></label>
         <div class="btn-end"><button class="btn" type="submit">➕ যোগ করুন</button></div>
       </form>
+      <p style="font-size:12px;color:#5B6357;margin:8px 0 0;">একই শ্রেণি, বার ও ঘণ্টায় আবার যোগ করলে আগের বিষয়টি বদলে যাবে।</p>
     </div>
-    <div class="arch">
-      <div class="tbl-toolbar"><button class="btn ghost small" data-print="classRoutine">🖨 প্রিন্ট করুন</button><div></div></div>
+    ${routineSettingsPanelHTML("class")}
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <select data-misc-field="routineMode">
+            <option value="class" ${mode==="class"?"selected":""}>শ্রেণিভিত্তিক রুটিন</option>
+            <option value="teacher" ${mode==="teacher"?"selected":""}>শিক্ষকভিত্তিক রুটিন</option>
+          </select>
+          <select data-misc-field="routineDay">
+            <option ${day==="প্রতিদিন"?"selected":""}>প্রতিদিন</option>
+            ${DAYS.map(d=>`<option ${d===day?"selected":""}>${d}</option>`).join("")}
+          </select>
+        </div>
+        <button class="btn small" data-action="print-class-routine">🖨 এই রুটিন প্রিন্ট করুন</button>
+      </div>
+      <div class="tbl-body" style="overflow-x:auto;">
+        <style>.rt-prev table.rt{border-collapse:collapse;min-width:620px;width:100%;} .rt-prev .rt th,.rt-prev .rt td{border:1.5px solid #333;padding:6px 4px;text-align:center;font-size:13px;} .rt-prev .rt th{background:#EEF2E8;} .rt-prev .rt td small{display:block;font-size:10.5px;color:#555;}</style>
+        <div class="rt-prev">${classRoutineGridHTML(mode, day)}</div>
+      </div>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar"><strong>সব এন্ট্রির তালিকা</strong><button class="btn ghost small" data-print="classRoutine">🖨 তালিকা প্রিন্ট</button></div>
       <div class="tbl-body" id="tbl-classRoutine">${classRoutineTableHTML()}</div>
     </div>`;
 }
@@ -1371,26 +1636,74 @@ function allExamNames(){
   db.results.forEach(r => { if(r.examName) set.add(r.examName); });
   return [...set];
 }
+function examGridModel(examName){
+  const rows = db.examRoutine.filter(r => (r.examName || "") === examName && r.date);
+  const sessOrder = s => { const i = SESSION_OPTIONS.indexOf(s || ""); return i < 0 ? 99 : i; };
+  const slots = [], seen = {};
+  rows.forEach(r => { const k = r.date + "|" + (r.time || ""); if(!seen[k]){ seen[k] = 1; slots.push({ date:r.date, sess:r.time || "" }); } });
+  slots.sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : sessOrder(a.sess) - sessOrder(b.sess));
+  const dates = [];
+  slots.forEach(s => { let d = dates.find(x => x.date === s.date); if(!d){ d = { date:s.date, sessions:[] }; dates.push(d); } d.sessions.push(s.sess); });
+  const present = new Set(rows.map(r => r.className));
+  const classes = allClassNames().filter(c => present.has(c));
+  return { rows, slots, dates, classes };
+}
+function examRoutineGridHTML(examName){
+  const { rows, slots, dates, classes } = examGridModel(examName);
+  if(!rows.length) return `<div class="empty">এই পরীক্ষার জন্য কোনো রুটিন নেই।</div>`;
+  const head1 = `<tr><th class="corner" rowspan="2" style="width:14%"><span class="a">তারিখ</span><span class="b">শ্রেণী</span></th>${dates.map(d => `<th colspan="${d.sessions.length}">${fmtDateDayMonth(d.date)}<br><span style="font-weight:500;font-size:14px;">${weekdayBn(d.date)}</span></th>`).join("")}</tr>`;
+  const head2 = `<tr>${slots.map(s => `<th style="font-weight:500;font-size:14px;">${esc(s.sess || "")}</th>`).join("")}</tr>`;
+  const body = classes.map(c => `<tr><td class="first">${esc(c)}</td>${slots.map(s => {
+    const list = rows.filter(r => r.className === c && r.date === s.date && (r.time || "") === s.sess);
+    return list.length ? `<td>${list.map(r => esc(r.subject)).join(" + ")}</td>` : `<td><span class="sym">❁</span></td>`;
+  }).join("")}</tr>`).join("");
+  return `<table class="rt"><thead>${head1}${head2}</thead><tbody>${body}</tbody></table>`;
+}
+function printExamRoutine(examName){
+  if(!examName){ alert("প্রথমে পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const m = examGridModel(examName);
+  if(!m.rows.length){ alert("এই পরীক্ষার জন্য তারিখসহ কোনো রুটিন নেই।"); return; }
+  const cfg = routineCfg();
+  const base = examName.replace(/পরীক্ষা$/, "পরীক্ষার");
+  const title = `${base} রুটিন ${cfg.examYearText}`.trim();
+  const note = cfg.examNote ? `<div class="note">${esc(cfg.examNote)}</div>` : "";
+  printRoutineDocument(title, examRoutineGridHTML(examName), note, routineSignHTML(), "landscape");
+}
 function renderExamRoutineTab(){
   const examNames = allExamNames();
+  const gridName = miscState.examGridName && examNames.includes(miscState.examGridName) ? miscState.examGridName : (examNames[0] || "");
   return `
-    <div class="sec-head"><div class="badge">📋</div><div><h2>পরীক্ষার রুটিন</h2><p>আসন্ন পরীক্ষার সময়সূচি</p></div></div>
+    <div class="sec-head"><div class="badge">📋</div><div><h2>পরীক্ষার রুটিন</h2><p>ড্রপডাউন থেকে বেছে পরীক্ষার সময়সূচি তৈরি ও প্রিন্ট করুন</p></div></div>
     <div class="arch form-card">
-      <form class="grid" data-form="examRoutine" style="grid-template-columns:repeat(5,1fr);">
-        <label class="field"><span>পরীক্ষার নাম</span><input name="examName" placeholder="যেমনঃ বার্ষিক পরীক্ষা"></label>
-        <label class="field"><span>শ্রেণি</span><select name="className">${CLASSES.map(c=>`<option>${c}</option>`).join("")}</select></label>
-        <label class="field"><span>বিষয়</span><input name="subject" required></label>
+      <form class="grid" data-form="examRoutine" style="grid-template-columns:repeat(3,1fr);">
+        <label class="field"><span>পরীক্ষার নাম</span><select name="examName" data-addable="exam">${examNameOptionsHTML(gridName)}</select></label>
+        <label class="field"><span>শ্রেণি</span><select name="className" data-addable="class">${classOptionsHTML("")}</select></label>
         <label class="field"><span>তারিখ</span><input type="date" name="date" value="${todayISO()}"></label>
-        <label class="field"><span>সময়</span><input name="time" placeholder="যেমনঃ সকাল ১০টা"></label>
+        <label class="field"><span>সময় (সকাল/বিকাল)</span><select name="time">${SESSION_OPTIONS.map(s=>`<option>${s}</option>`).join("")}</select></label>
+        <label class="field" style="grid-column:span 2;"><span>বিষয়/বই (শ্রেণি অনুযায়ী তালিকা)</span><select name="subject" data-addable="subject" required>${subjectOptionsHTML("", allClassNames()[0])}</select></label>
         <div class="btn-end"><button class="btn" type="submit">➕ যোগ করুন</button></div>
       </form>
     </div>
-    <div class="arch">
-      <div class="tbl-toolbar"><button class="btn ghost small" data-print="examRoutine">🖨 প্রিন্ট করুন</button><div></div></div>
+    ${routineSettingsPanelHTML("exam")}
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <strong>রুটিন ছক:</strong>
+          <select data-misc-field="examGridName">${examNames.length ? examNames.map(n=>`<option ${n===gridName?"selected":""}>${esc(n)}</option>`).join("") : `<option value="">— কোনো পরীক্ষা নেই —</option>`}</select>
+        </div>
+        <button class="btn small" data-action="print-exam-routine" data-exam="${esc(gridName)}">🖨 ছক আকারে প্রিন্ট</button>
+      </div>
+      <div class="tbl-body" style="overflow-x:auto;">
+        <style>.rt-prev table.rt{border-collapse:collapse;min-width:620px;width:100%;} .rt-prev .rt th,.rt-prev .rt td{border:1.5px solid #333;padding:6px 4px;text-align:center;font-size:13px;} .rt-prev .rt th{background:#EEF2E8;} .rt-prev .sym{font-size:20px;}</style>
+        <div class="rt-prev">${gridName ? examRoutineGridHTML(gridName) : `<div class="empty">প্রথমে উপরের ফর্ম থেকে রুটিন যোগ করুন।</div>`}</div>
+      </div>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar"><strong>সব এন্ট্রির তালিকা</strong><button class="btn ghost small" data-print="examRoutine">🖨 তালিকা প্রিন্ট</button></div>
       <div class="tbl-body" id="tbl-examRoutine">${examRoutineTableHTML()}</div>
     </div>
 
-    <div class="sec-head" style="margin-top:8px;"><div class="badge">🪪</div><div><h2>প্রবেশপত্র (Admit Card)</h2><p>নির্বাচিত পরীক্ষা ও শ্রেণির ছাত্রদের জন্য প্রবেশপত্র তৈরি করুন</p></div></div>
+    <div class="sec-head" style="margin-top:8px;"><div class="badge">🪪</div><div><h2>প্রবেশপত্র (Admit Card)</h2><p>ভর্তি নং ও সিট নংসহ ছাত্রদের প্রবেশপত্র তৈরি করুন</p></div></div>
     <div class="arch form-card">
       ${examNames.length===0 ? `<div class="empty">প্রথমে উপরে পরীক্ষার রুটিনে অন্তত একটি পরীক্ষার নাম যোগ করুন।</div>` : `
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
@@ -1403,11 +1716,423 @@ function renderExamRoutineTab(){
         <label class="field"><span>শ্রেণি</span>
           <select data-misc-field="admitClassFilter">
             <option value="all" ${miscState.admitClassFilter==='all'?'selected':''}>সকল শ্রেণি</option>
-            ${CLASSES.map(c=>`<option ${c===miscState.admitClassFilter?'selected':''}>${c}</option>`).join("")}
+            ${allClassNames().map(c=>`<option ${c===miscState.admitClassFilter?'selected':''}>${esc(c)}</option>`).join("")}
           </select>
         </label>
+        <button class="btn ghost" type="button" data-action="assign-seats">🔢 সিট নং স্বয়ংক্রিয় বরাদ্দ</button>
         <button class="btn" type="button" data-action="print-admit-cards">🖨 প্রবেশপত্র প্রিন্ট করুন</button>
-      </div>`}
+      </div>
+      <p style="font-size:12px;color:#5B6357;margin:8px 0 0;">সিট নং ছাত্রের তথ্য সম্পাদনার ঘর থেকেও হাতে দেওয়া যায়। ভর্তি নং ছাত্রের তথ্য থেকে আসবে।</p>`}
+    </div>`;
+}
+
+/* ============================ নোটিস ============================ */
+const NOTICE_TEMPLATES = {
+  "পরীক্ষার নোটিস": "এতদ্বারা মাদরাসার সকল ছাত্রদের অবগতির জন্য জানানো যাচ্ছে যে, আগামী ........ ইং রোজ ........ হতে ........ ইং রোজ ........ পর্যন্ত ........ পরীক্ষা চলবে, ইনশাআল্লাহ।\nঅতএব আগামী ........ ইং রোজ ........ এর মধ্যে পরীক্ষার নির্ধারিত ফি এবং চলতি মাসের বেতন সহ বকেয়া বেতন জমা দিতে এবং পরীক্ষার পূর্ণ প্রস্তুতি নিতে আদেশ করা হইল।",
+  "ছুটির নোটিস": "এতদ্বারা মাদরাসার সকল ছাত্র ও অভিভাবকদের অবগতির জন্য জানানো যাচ্ছে যে, আগামী ........ ইং রোজ ........ হতে ........ ইং রোজ ........ পর্যন্ত মাদরাসা বন্ধ থাকবে। ছুটির পর ........ ইং রোজ ........ মাদরাসা পুনরায় খুলবে, ইনশাআল্লাহ।\nসকল ছাত্রকে যথাসময়ে মাদরাসায় উপস্থিত হওয়ার জন্য আদেশ করা হইল।",
+  "বেতন আদায়ের নোটিস": "এতদ্বারা মাদরাসার সকল ছাত্র ও অভিভাবকদের জানানো যাচ্ছে যে, আগামী ........ ইং তারিখের মধ্যে চলতি মাসের বেতন ও বকেয়া বেতন পরিশোধ করার জন্য আদেশ করা হইল। অন্যথায় পরবর্তী ব্যবস্থা গ্রহণ করা হবে।",
+  "সাধারণ নোটিস": "এতদ্বারা সকলের অবগতির জন্য জানানো যাচ্ছে যে, ........"
+};
+function noticeFeeRowHTML(){
+  return `<div class="fee-row" style="display:flex;gap:8px;margin-top:6px;">
+    <select name="feeClass" style="flex:2;">${classOptionsHTML("", false)}</select>
+    <input name="feeAmt" type="number" min="0" placeholder="টাকা" style="flex:1;">
+    <button type="button" class="del-btn" data-remove-fee-row title="সারি মুছুন">✖</button></div>`;
+}
+function noticeListHTML(){
+  const rows = db.notices || [];
+  if(!rows.length) return `<div class="empty">এখনো কোনো নোটিস তৈরি করা হয়নি।</div>`;
+  return `<table><thead><tr><th>তারিখ</th><th>বিষয়/শুরুর অংশ</th><th></th></tr></thead><tbody>${rows.map(n => {
+    const snip = (n.subject || n.body || "").replace(/\s+/g, " ").slice(0, 60);
+    return `<tr><td>${fmtDate(n.date)}</td><td>${esc(snip)}${(n.subject||n.body||"").length>60?"…":""}</td>
+      <td style="text-align:center;white-space:nowrap;"><button class="del-btn" data-notice-print="${n.id}" title="প্রিন্ট">🖨</button>
+      <button class="del-btn" data-delete="notices" data-id="${n.id}">🗑</button></td></tr>`;
+  }).join("")}</tbody></table>`;
+}
+function renderNoticesTab(){
+  return `
+    <div class="sec-head"><div class="badge">📢</div><div><h2>নোটিস</h2><p>মাদরাসার লেটারহেডে নোটিস তৈরি ও প্রিন্ট করুন</p></div></div>
+    <div class="arch form-card">
+      <form class="grid" data-form="notices" style="grid-template-columns:repeat(2,1fr);">
+        <label class="field"><span>তারিখ</span><input type="date" name="date" value="${todayISO()}"></label>
+        <label class="field"><span>সূত্র নং (ঐচ্ছিক)</span><input name="ref"></label>
+        <label class="field" style="grid-column:span 2;"><span>দ্রুত টেমপ্লেট বেছে নিন</span>
+          <select data-notice-template><option value="">— টেমপ্লেট নির্বাচন করুন —</option>${Object.keys(NOTICE_TEMPLATES).map(k=>`<option>${k}</option>`).join("")}</select></label>
+        <label class="field" style="grid-column:span 2;"><span>বিষয়/শিরোনাম (ঐচ্ছিক)</span><input name="subject" placeholder="যেমনঃ ১ম সাময়িক পরীক্ষা সংক্রান্ত নোটিস"></label>
+        <label class="field" style="grid-column:span 2;"><span>নোটিসের বিবরণ (নতুন অনুচ্ছেদের জন্য এন্টার চাপুন)</span><textarea name="body" rows="7" required style="width:100%;font-family:inherit;font-size:15px;padding:8px;border:1px solid #C9CFC0;border-radius:8px;"></textarea></label>
+        <div style="grid-column:span 2;">
+          <strong style="font-size:13px;">নির্ধারিত ফি তালিকা (ঐচ্ছিক)</strong>
+          <div id="feeRows"></div>
+          <button type="button" class="btn ghost small" data-add-fee-row style="margin-top:6px;">➕ ফি সারি যোগ করুন</button>
+        </div>
+        <label class="field"><span>স্বাক্ষরকারীর নাম</span><input name="signerName" placeholder="যেমনঃ (মাওঃ ........)"></label>
+        <label class="field"><span>পদবী</span>
+          <select name="signerTitle">
+            <option>মুহতামিম, অত্র মাদরাসা</option><option>নাযেমে তা'লীমাত, অত্র মাদরাসা</option>
+            <option>সেক্রেটারি, অত্র মাদরাসা</option><option>সভাপতি, পরিচালনা কমিটি</option><option>অধ্যক্ষ, অত্র মাদরাসা</option>
+          </select></label>
+        <label class="field" style="grid-column:span 2;flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" name="order" checked> <span>"আদেশক্রমে" লিখুন</span></label>
+        <div class="btn-end" style="grid-column:span 2;"><button class="btn" type="submit">💾 সংরক্ষণ করে প্রিন্ট করুন</button></div>
+      </form>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar"><strong>সংরক্ষিত নোটিস</strong><div></div></div>
+      <div class="tbl-body">${noticeListHTML()}</div>
+    </div>`;
+}
+function printNotice(n){
+  const logo = getBrandLogo();
+  const est = getBrandingConfig().est === undefined ? "১৯৪১" : getBrandingConfig().est;
+  const paras = String(n.body || "").split(/\n+/).filter(x => x.trim()).map(p => `<p class="para">${esc(p)}</p>`).join("");
+  const fees = (n.fees || []).filter(f => f.cls && f.amt !== "" && f.amt != null);
+  const feeBox = fees.length ? `<div class="scroll"><table class="fee"><thead><tr><th colspan="2">নির্ধারিত ফি</th></tr></thead><tbody>${fees.map(f => `<tr><td>${esc(f.cls)}</td><td>${bn(f.amt)}/=</td></tr>`).join("")}</tbody></table></div>` : "";
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>নোটিস</title>
+  <style>
+    @page{size:A4 portrait;margin:12mm 14mm;}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#000;margin:0;}
+    .page{position:relative;min-height:268mm;display:flex;flex-direction:column;}
+    .wm{position:absolute;left:0;right:0;top:70mm;display:flex;justify-content:center;pointer-events:none;z-index:0;}
+    .wm img{width:120mm;height:120mm;object-fit:contain;opacity:.07;}
+    .in{position:relative;z-index:1;display:flex;flex-direction:column;flex:1;}
+    .hd{position:relative;text-align:center;padding-bottom:6px;}
+    .hd h1{margin:0;font-size:31px;line-height:1.3;font-weight:800;}
+    .hd .addr{font-size:17px;line-height:1.7;margin-top:2px;}
+    .hd img.lg{position:absolute;left:2mm;top:24mm;width:30mm;height:30mm;object-fit:contain;}
+    .rule{border-top:4px solid #000;border-bottom:1.5px solid #000;height:7px;margin:6px 0 10px;}
+    .dateline{text-align:right;font-size:17px;}
+    .ref{font-size:17px;margin-top:4px;}
+    .subj{text-align:center;font-weight:700;font-size:18px;text-decoration:underline;margin:10px 0 4px;}
+    .para{font-size:18px;line-height:2.05;text-align:justify;text-indent:2.2em;margin:6px 0;}
+    .bottom{display:flex;justify-content:space-between;align-items:flex-end;margin-top:26px;gap:10px;}
+    .scroll{border:2px dotted #000;border-radius:14px;padding:10px 14px 10px 26px;min-width:68mm;}
+    table.fee{border-collapse:collapse;width:100%;}
+    .fee th,.fee td{border:1px solid #444;padding:6px 10px;text-align:center;font-size:17px;}
+    .fee th{font-size:18px;}
+    .sign{text-align:center;font-size:17px;line-height:1.8;margin-left:auto;padding-bottom:4px;}
+    .sign .sp{height:60px;}
+    @media screen{ body{padding:12px;} .page{background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.2);padding:14mm;} }
+  </style></head><body>
+    <div class="page"><div class="wm"><img src="${logo}" alt=""></div>
+    <div class="in">
+      <div class="hd"><img class="lg" src="${logo}" alt="">
+        ${brandArabicHTML(38)}
+        <h1 ${titleStyle(31)}>${esc(getBrandTitle())}</h1>
+        <div class="addr">${esc(getBrandSub())}${est?`<br>স্থাপিত : ${bn(est)} ইং`:""}</div>
+      </div>
+      <div class="rule"></div>
+      <div class="dateline">তাং ${fmtDateSlash(n.date)} ইং</div>
+      <div class="ref">সূত্র${n.ref?` : ${esc(n.ref)}`:""}</div>
+      ${n.subject ? `<div class="subj">বিষয় : ${esc(n.subject)}</div>` : ""}
+      ${paras}
+      <div class="bottom">
+        <div>${feeBox}</div>
+        <div class="sign">${n.order !== false ? "আদেশক্রমে" : ""}<div class="sp"></div>${n.signerName ? `<b>${esc(n.signerName)}</b><br>` : ""}${esc(n.signerTitle || "")}</div>
+      </div>
+    </div></div>
+  </body></html>`;
+  const win = window.open("", "_blank");
+  if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+  safePrint(win);
+}
+
+/* ============================ সিট প্ল্যান, নম্বরপত্র ও কিতাব লাইব্রেরি ============================ */
+const clampN = (n, a, b) => Math.min(b, Math.max(a, n));
+const SEAT_PALETTE = ["#FFFFFF","#E8F5DF","#FFF1D0","#E3EBFA","#FBE6EB","#EDE4F6"];
+
+function boxValues(id){
+  const box = document.getElementById(id), out = {};
+  if(!box) return out;
+  box.querySelectorAll("[name]").forEach(el => { out[el.name] = el.type === "checkbox" ? el.checked : el.value; });
+  return out;
+}
+function seatOrderedStudents(cls){
+  const order = allClassNames();
+  return db.students.filter(s => !cls || cls === "all" || s.className === cls)
+    .sort((a,b) => (order.indexOf(a.className) - order.indexOf(b.className))
+      || ((parseInt(sidKey(a.sid),10)||0) - (parseInt(sidKey(b.sid),10)||0))
+      || String(a.name||"").localeCompare(String(b.name||""), "bn"));
+}
+function mixClasses(list){
+  const groups = {}, keys = [];
+  list.forEach(s => { if(!groups[s.className]){ groups[s.className] = []; keys.push(s.className); } groups[s.className].push(s); });
+  const out = []; let left = list.length;
+  while(left > 0){ keys.forEach(k => { if(groups[k].length){ out.push(groups[k].shift()); left--; } }); }
+  return out;
+}
+function buildSeatPlan(v){
+  const cols = clampN(parseInt(v.cols,10)||4, 1, 8), rows = clampN(parseInt(v.rows,10)||6, 1, 12), per = clampN(parseInt(v.per,10)||2, 1, 4);
+  const start = parseInt(v.start,10) || 1;
+  const cap = cols * rows * per;
+  let people = [];
+  if(v.names){ people = seatOrderedStudents(v.cls || "all"); if(v.mix && (v.cls||"all") === "all") people = mixClasses(people); }
+  const roomCount = v.names ? Math.max(1, Math.ceil(people.length / cap)) : clampN(parseInt(v.rooms,10)||1, 1, 20);
+  const rooms = [];
+  for(let r = 0; r < roomCount; r++){
+    const seats = [];
+    for(let i = 0; i < cap; i++){
+      const g = r * cap + i;
+      seats.push({ no: start + g, person: v.names ? (people[g] || null) : null });
+    }
+    rooms.push({ index: r + 1, seats });
+  }
+  return { cols, rows, per, cap, rooms, people, start, order: v.order === "col" ? "col" : "row" };
+}
+function printSeatPlan(v){
+  const plan = buildSeatPlan(v);
+  if(v.names && !plan.people.length){ alert("এই শ্রেণিতে কোনো ছাত্র নেই। ফাঁকা সিট প্ল্যানের জন্য \"ছাত্রের নামসহ\" টিক তুলে দিন।"); return; }
+  const used = [...new Set(plan.people.map(s => s.className))];
+  const tint = c => SEAT_PALETTE[Math.max(0, used.indexOf(c)) % SEAT_PALETTE.length];
+  const across = plan.cols * plan.per;
+  let f = plan.rows <= 6 ? { no:20, nm:12.5, cl:9.5 } : plan.rows <= 9 ? { no:16, nm:11, cl:8.5 } : { no:13, nm:9.5, cl:7.5 };
+  if(across > 8){ f = { no:Math.min(f.no,14), nm:Math.min(f.nm,9), cl:Math.min(f.cl,7.5) }; }
+  const title = "সিট প্ল্যান" + (v.exam && v.exam !== "__new__" ? " — " + v.exam : "");
+  const sections = plan.rooms.map(room => {
+    const grid = Array.from({ length: plan.rows }, () => Array.from({ length: plan.cols }, () => []));
+    room.seats.forEach((seat, i) => {
+      const bench = Math.floor(i / plan.per);
+      let br, bc;
+      if(plan.order === "col"){ bc = Math.floor(bench / plan.rows); br = bench % plan.rows; }
+      else { br = Math.floor(bench / plan.cols); bc = bench % plan.cols; }
+      grid[br][bc].push(seat);
+    });
+    const seatHTML = seat => {
+      const p = seat.person;
+      const faint = v.names && !p ? "opacity:.4;" : "";
+      return `<div class="seat" style="background:${p ? tint(p.className) : "#fff"};${faint}"><div class="no">${bn(seat.no)}</div>${
+        v.names ? `<div class="nm">${p ? esc(p.name) : ""}</div><div class="cl">${p ? esc(p.className) : ""}</div>` : `<div class="nm"></div>`}</div>`;
+    };
+    const cells = grid.flat().map(seats => `<div class="bench">${seats.map(seatHTML).join("")}</div>`).join("");
+    const firstNo = room.seats[0].no;
+    const lastSeat = v.names ? ([...room.seats].reverse().find(s => s.person) || room.seats[room.seats.length-1]) : room.seats[room.seats.length-1];
+    const filled = v.names ? room.seats.filter(s => s.person).length : 0;
+    return `<section class="room">
+      ${fancyHeaderHTML({ title: title, compact: true })}
+      <div class="info"><span>কক্ষ: <b>${esc(v.room || "পরীক্ষা কক্ষ")}${plan.rooms.length > 1 ? " - " + bn(room.index) : ""}</b></span>
+        <span>আসন নং: <b>${bn(firstNo)} – ${bn(lastSeat.no)}</b></span>
+        ${v.names ? `<span>ছাত্র সংখ্যা: <b>${bn(filled)}</b> জন</span>` : `<span>মোট আসন: <b>${bn(plan.cap)}</b></span>`}</div>
+      <div class="board">বোর্ড / পরীক্ষকের টেবিল</div>
+      <div class="grid" style="grid-template-columns:repeat(${plan.cols},1fr);grid-template-rows:repeat(${plan.rows},1fr);--no:${f.no}px;--nm:${f.nm}px;--cl:${f.cl}px;">${cells}</div>
+      <div class="foot">
+        <div class="door">▮ প্রবেশদ্বার</div>
+        ${used.length > 1 ? `<div class="legend">${used.map(c => `<span><i style="background:${tint(c)}"></i>${esc(c)}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="signs"><div>কক্ষ পরিদর্শকের স্বাক্ষর</div><div>পরীক্ষা নিয়ন্ত্রকের স্বাক্ষর</div><div>মুহতামিমের স্বাক্ষর</div></div>
+    </section>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>সিট প্ল্যান</title>
+  <style>
+    @page{size:A4 landscape;margin:7mm 9mm;}
+    ${FANCY_HEADER_CSS}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#000;margin:0;}
+    .room{page-break-after:always;height:192mm;display:flex;flex-direction:column;border:2.5px solid #14432A;border-radius:6px;padding:4mm 6mm;position:relative;}
+    .room:last-child{page-break-after:auto;}
+    .room::before{content:"";position:absolute;inset:3px;border:1px solid #C9A227;border-radius:4px;pointer-events:none;}
+    .hd{text-align:center;} .hd h1{margin:0;font-size:22px;line-height:1.3;font-weight:800;}
+    .hd .tt{display:inline-block;margin-top:2px;font-size:16px;font-weight:700;color:#14432A;background:#FBF3D5;border:1.5px solid #C9A227;border-radius:14px;padding:0 18px;}
+    .info{display:flex;justify-content:space-between;font-size:13.5px;margin:4px 2px;}
+    .board{align-self:center;width:58%;text-align:center;border:2px solid #14432A;background:#E8F5DF;border-radius:6px;padding:3px 0;font-size:13.5px;font-weight:700;margin:2px 0 6px;}
+    .grid{flex:1;display:grid;gap:7px 12px;min-height:0;}
+    .bench{display:flex;border:2px solid #14432A;border-radius:6px;overflow:hidden;background:#fff;}
+    .seat{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid #8AA08F;padding:1px 2px;text-align:center;overflow:hidden;}
+    .seat:last-child{border-right:0;}
+    .seat .no{font-size:var(--no);font-weight:800;line-height:1.1;color:#14432A;}
+    .seat .nm{font-size:var(--nm);line-height:1.15;font-weight:600;word-break:break-word;min-height:1em;}
+    .seat .cl{font-size:var(--cl);color:#555;line-height:1.1;}
+    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;font-size:12.5px;}
+    .door{border:1.5px solid #333;border-radius:4px;padding:1px 10px;font-weight:600;}
+    .legend span{margin-left:12px;white-space:nowrap;} .legend i{display:inline-block;width:11px;height:11px;border:1px solid #666;margin-right:4px;vertical-align:-1px;}
+    .signs{display:flex;justify-content:space-between;margin-top:14px;font-size:12.5px;}
+    .signs div{border-top:1px solid #000;padding-top:2px;min-width:52mm;text-align:center;}
+    @media screen{ body{padding:10px;background:#eee;} .room{background:#fff;margin-bottom:12px;} }
+  </style></head><body>${sections}</body></html>`;
+  const win = window.open("", "_blank");
+  if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+  safePrint(win);
+}
+function saveSeatNumbers(v){
+  if(!v.names){ alert("সিট নং সংরক্ষণের জন্য \"ছাত্রের নামসহ\" টিক দিন।"); return; }
+  const plan = buildSeatPlan(v);
+  if(!plan.people.length){ alert("এই শ্রেণিতে কোনো ছাত্র নেই।"); return; }
+  if(!confirm(bn(plan.people.length) + " জন ছাত্রের সিট নং এই প্ল্যান অনুযায়ী সংরক্ষণ হবে (প্রবেশপত্রে ছাপা হবে)। আগের সিট নং বদলে যাবে। নিশ্চিত?")) return;
+  plan.rooms.forEach(room => room.seats.forEach(seat => { if(seat.person){ seat.person.seatNo = String(seat.no); } }));
+  saveDB(); renderContent();
+  alert("সিট নং ছাত্রদের তথ্যে সংরক্ষণ করা হয়েছে।");
+}
+function printMarksSheet(v){
+  const people = v.names ? seatOrderedStudents(v.cls || "all") : [];
+  if(v.names && !people.length){ alert("এই শ্রেণিতে কোনো ছাত্র নেই। সম্পূর্ণ ফাঁকা নম্বরপত্রের জন্য \"ছাত্রের নামসহ\" টিক তুলে দিন।"); return; }
+  const n = v.names ? people.length : clampN(parseInt(v.rows,10)||30, 1, 150);
+  const blank = "&nbsp;";
+  const rows = Array.from({ length: n }, (_, i) => {
+    const s = people[i];
+    return `<tr><td>${bn(i+1)}</td><td>${s && s.admissionNo ? esc(bn(s.admissionNo)) : blank}</td><td class="nm">${s ? esc(s.name) : blank}</td><td>${blank}</td><td>${blank}</td><td>${blank}</td></tr>`;
+  }).join("");
+  const dash = t => t ? `<b>${esc(t)}</b>` : `<span class="dots"></span>`;
+  const examName = v.exam && v.exam !== "__new__" ? v.exam : "";
+  const subj = v.subject && v.subject !== "__new__" ? v.subject : "";
+  const clsName = v.cls && v.cls !== "all" ? v.cls : "";
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>নম্বরপত্র</title>
+  <style>
+    @page{size:A4 portrait;margin:10mm 12mm;}
+    ${FANCY_HEADER_CSS}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#000;margin:0;}
+    .hd{text-align:center;border-bottom:3px double #14432A;padding-bottom:6px;margin-bottom:8px;}
+    .hd h1{margin:0;font-size:24px;line-height:1.3;font-weight:800;}
+    .hd .tt{display:inline-block;margin-top:4px;font-size:18px;font-weight:700;color:#14432A;background:#FBF3D5;border:1.5px solid #C9A227;border-radius:16px;padding:1px 26px;}
+    .meta{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:14.5px;margin:8px 0 8px;}
+    .meta div{display:flex;align-items:flex-end;gap:5px;} .meta .dots{display:inline-block;min-width:34mm;border-bottom:1px dotted #000;height:15px;}
+    table{width:100%;border-collapse:collapse;}
+    th,td{border:1.5px solid #000;text-align:center;font-size:14px;height:9.2mm;padding:0 4px;}
+    th{background:#E8F5DF;font-weight:700;height:9mm;}
+    td.nm{text-align:left;padding-left:8px;font-weight:600;}
+    thead{display:table-header-group;} tr{page-break-inside:avoid;}
+    .signs{display:flex;justify-content:space-between;margin-top:26px;font-size:13.5px;page-break-inside:avoid;}
+    .signs div{border-top:1px solid #000;padding-top:3px;min-width:44mm;text-align:center;}
+    @media screen{ body{padding:12px;} }
+  </style></head><body>
+    ${fancyHeaderHTML({ title: "নম্বরপত্র" + (examName ? " — " + examName : "") })}
+    <div class="meta">
+      <div>শ্রেণি: ${dash(clsName)}</div><div>বিষয়: ${dash(subj)}</div>
+      <div>পূর্ণমান: ${dash(v.full ? bn(v.full) : "")}</div><div>তারিখ: ${dash(v.date ? fmtDate(v.date) : "")}</div>
+    </div>
+    <table><thead><tr><th style="width:8%">ক্রমিক</th><th style="width:11%">ভর্তি নং</th><th style="width:31%">ছাত্রের নাম</th><th style="width:14%">প্রাপ্ত নম্বর<br><small>(অংকে)</small></th><th style="width:21%">কথায়</th><th style="width:15%">মন্তব্য</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="signs"><div>পরীক্ষকের নাম ও স্বাক্ষর</div><div>যাচাইকারীর স্বাক্ষর</div><div>নাযেমে তা'লীমাতের স্বাক্ষর</div><div>মুহতামিমের স্বাক্ষর</div></div>
+  </body></html>`;
+  const win = window.open("", "_blank");
+  if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+  safePrint(win);
+}
+function renderSeatPlanTab(){
+  const examNames = allExamNames();
+  const clsOpts = `<option value="all">সকল শ্রেণি</option>` + allClassNames().map(c => `<option>${esc(c)}</option>`).join("");
+  const chk = (name, label, on) => `<label class="field" style="flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" name="${name}" ${on?"checked":""}> <span>${label}</span></label>`;
+  return `
+    <div class="sec-head"><div class="badge">🪑</div><div><h2>সিট প্ল্যান</h2><p>পরীক্ষা কক্ষের বেঞ্চ ও আসনের নকশা তৈরি ও প্রিন্ট করুন</p></div></div>
+    <div class="arch form-card" id="seatPlanBox">
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);">
+        <label class="field"><span>পরীক্ষার নাম</span><select name="exam" data-addable="exam">${examNameOptionsHTML(examNames[0]||"")}</select></label>
+        <label class="field"><span>কক্ষের নাম</span><input name="room" value="পরীক্ষা কক্ষ"></label>
+        <label class="field"><span>শ্রেণি</span><select name="cls">${clsOpts}</select></label>
+        <label class="field"><span>প্রথম সিট নং</span><input name="start" type="number" min="1" value="1"></label>
+        <label class="field"><span>বেঞ্চের কলাম (পাশাপাশি)</span><input name="cols" type="number" min="1" max="8" value="4"></label>
+        <label class="field"><span>বেঞ্চের সারি (সামনে-পেছনে)</span><input name="rows" type="number" min="1" max="12" value="6"></label>
+        <label class="field"><span>প্রতি বেঞ্চে কতজন</span><select name="per"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+        <label class="field"><span>সিট নং এর ক্রম</span><select name="order"><option value="row">সারি ধরে (বাম → ডান)</option><option value="col">কলাম ধরে (ওপর → নিচ)</option></select></label>
+        ${chk("names","ছাত্রের নামসহ (টিক তুললে ফাঁকা সিট প্ল্যান হবে)",true)}
+        ${chk("mix","সব শ্রেণি মিশিয়ে বসান (পাশাপাশি আলাদা শ্রেণি)",false)}
+        <label class="field"><span>ফাঁকা প্ল্যানের কক্ষ সংখ্যা</span><input name="rooms" type="number" min="1" max="20" value="1"></label>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn" type="button" data-action="print-seat-plan">🖨 সিট প্ল্যান প্রিন্ট</button>
+        <button class="btn ghost" type="button" data-action="save-seat-numbers">💾 সিট নং ছাত্রদের তথ্যে সংরক্ষণ</button>
+      </div>
+      <p style="font-size:12px;color:#5B6357;margin:8px 0 0;">ছাত্র সংখ্যা এক কক্ষের আসনের চেয়ে বেশি হলে নিজে থেকে পরের কক্ষের পাতা তৈরি হবে। সংরক্ষণ করলে প্রবেশপত্রে সিট নং আসবে।</p>
+    </div>
+
+    <div class="sec-head" style="margin-top:8px;"><div class="badge">📝</div><div><h2>নম্বরপত্র (ফাঁকা/নামসহ)</h2><p>পরীক্ষকের নম্বর লেখার জন্য প্রিন্ট করুন</p></div></div>
+    <div class="arch form-card" id="marksBox">
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);">
+        <label class="field"><span>পরীক্ষার নাম</span><select name="exam" data-addable="exam"><option value="">— ফাঁকা রাখুন —</option>${examNameOptionsHTML("")}</select></label>
+        <label class="field"><span>শ্রেণি</span><select name="cls">${clsOpts}</select></label>
+        <label class="field"><span>বিষয়/বই (শ্রেণি অনুযায়ী তালিকা)</span><select name="subject" data-addable="subject">${subjectOptionsHTML("")}</select></label>
+        <label class="field"><span>পূর্ণমান</span><input name="full" type="number" min="0" placeholder="যেমনঃ ১০০"></label>
+        <label class="field"><span>তারিখ</span><input name="date" type="date"></label>
+        <label class="field"><span>ফাঁকা সারির সংখ্যা</span><input name="rows" type="number" min="1" max="150" value="30"></label>
+        ${chk("names","ছাত্রের নামসহ (টিক তুললে শ্রেণির ছাত্রদের নাম বসবে; না তুললে সম্পূর্ণ ফাঁকা)",false)}
+      </div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="print-marks-sheet">🖨 নম্বরপত্র প্রিন্ট</button></div>
+    </div>`;
+}
+
+/* ============================ কিতাব লাইব্রেরি ============================ */
+const BOOK_LEVELS = ["নূরানী ও প্রাথমিক","ফার্সী ও উর্দু","সরফ ও নাহু","আরবি ভাষা ও আদব","ফিকহ ও উসূল","তাফসীর ও উলূমুল কুরআন","হাদীস","মানতিক ও কালাম","ইতিহাস ও সিরাত","কিতাব সংকলন","অন্যান্য"];
+const BOOK_SEED = [
+  { t:"নূরানী কায়দা (ইদারা সাদাত)", level:"নূরানী ও প্রাথমিক", url:"https://archive.org/details/noorani-qaida-download", note:"কুরআন শিক্ষার প্রাথমিক কায়দা — PDF ডাউনলোড অপশন আছে" },
+  { t:"নূরানী কায়দা (শায়খ নূর মুহাম্মদ)", level:"নূরানী ও প্রাথমিক", url:"https://archive.org/details/NooraniQaida", note:"৩২ পৃষ্ঠার কায়দা" },
+  { t:"হেদায়াতুন নাহু ও আরবি ব্যাকরণের বই", level:"সরফ ও নাহু", url:"https://archive.org/details/HidiyahFiNawaAndArabicBooks", note:"হেদায়াতুন নাহুর আরবি পিডিএফ ও চার্ট" },
+  { t:"হেদায়াতুন নাহু (আরবী)", level:"সরফ ও নাহু", url:"https://archive.org/details/Misbahi_Library_File_No__945__", note:"পিডিএফ ডাউনলোড অপশন আছে" },
+  { t:"ইনায়াতুন নাহু (হেদায়াতুন নাহুর শরাহ)", level:"সরফ ও নাহু", url:"https://archive.org/details/InayatUlNahwAlaHidayatnnahwArabicPDFBook", note:"আরবি পিডিএফ" },
+  { t:"হেদায়াতুস সরফ", level:"সরফ ও নাহু", url:"https://archive.org/details/hidayatussarf_202001", note:"পিডিএফ ডাউনলোড অপশন আছে" },
+  { t:"নাহু ও সরফের বই সংকলন", level:"সরফ ও নাহু", url:"https://archive.org/details/20200625_20200625_0605", note:"তাসহীলুন নাহু, তাসহীলুস সরফ, আজুরুমিয়ার শরাহ ইত্যাদি" },
+  { t:"কওমী মাদরাসা কিতাব (বাংলা) সংকলন", level:"কিতাব সংকলন", url:"https://archive.org/details/qaumi-madrasa-kitab-bangla", note:"মীযান, সাফওয়াতুল মাসাদির, তারিখুল ইসলাম, নুখবাতুল ফিকার, কামুসুল জাদীদ, মিসবাহুল লুগাত" },
+  { t:"বাংলাদেশ কওমী মাদরাসা কিতাব (Almodina)", level:"কিতাব সংকলন", url:"https://archive.org/details/kawmi", note:"আল-ফিকহুল মুয়াসসার, গুলিস্তাঁ, ইলমুস সরফ, পান্দেনামা, আল-হেদায়া, দরসে তিরমিযী, নসরুল বারী, শরহে মুসলিম ইত্যাদি" },
+  { t:"বুখারী শরীফ (ইসলামিক ফাউন্ডেশন বাংলাদেশ)", level:"হাদীস", url:"https://archive.org/details/bukhari-ifb", note:"১০ খণ্ডের পিডিএফ" },
+  { t:"বুখারী শরীফ (আল্লামা আজিজুল হক)", level:"হাদীস", url:"https://archive.org/details/bukharisharif", note:"বাংলা অনুবাদ ও ব্যাখ্যা" },
+  { t:"সহীহ বুখারী (বাংলা ও আরবি)", level:"হাদীস", url:"https://archive.org/details/SahihBukhariBangla_201508", note:"১০ খণ্ড" },
+  { t:"মুসলিম শরীফ (বাংলা)", level:"হাদীস", url:"https://archive.org/details/muslimsharif", note:"খণ্ডভিত্তিক পিডিএফ" },
+  { t:"মিশকাত শরীফ (বাংলা, সম্পূর্ণ)", level:"হাদীস", url:"https://archive.org/details/MishkatSharifBanglaFull", note:"৬ খণ্ড" },
+  { t:"হাদীস সংকলন: বুখারী, মুসলিম, তিরমিযী", level:"হাদীস", url:"https://archive.org/details/BanglaIslamickitab", note:"বাংলা ইসলামিক কিতাব সংকলন" }
+];
+const BOOK_NAMES = {
+  "নূরানী ও প্রাথমিক": ["নূরানী কায়দা","আমপারা","তাজবীদ শিক্ষা","দোয়া ও মাসনূন আমল","নামায শিক্ষা"],
+  "ফার্সী ও উর্দু": ["ফার্সী পহেলী","তাইসীরুল মুবতাদী","করীমা","পান্দেনামা","গুলিস্তাঁ","বুস্তাঁ","উর্দু কায়দা"],
+  "সরফ ও নাহু": ["মীযানুস সরফ","পাঞ্জেগাঞ্জ","ইলমুস সীগাহ","নাহবেমীর","হেদায়াতুন নাহু","শরহে মিআতু আমেল","কাফিয়া","শরহে জামী","ইলমুস সরফ"],
+  "আরবি ভাষা ও আদব": ["এসো আরবী শিখি","আত-তারীক ইলাল আরাবিয়্যাহ","রওযাতুল আদব","নফহাতুল আরব","মাকামাতে হারীরী","কামূসুল জাদীদ","মিসবাহুল লুগাত"],
+  "ফিকহ ও উসূল": ["নূরুল ঈযাহ","কুদূরী","আল-ফিকহুল মুয়াসসার","কানযুদ দাকাইক","শরহে বেকায়া","হেদায়া","উসূলুশ শাশী","নূরুল আনওয়ার","সহজ উসূলে ফিকহ"],
+  "তাফসীর ও উলূমুল কুরআন": ["তারজামাতুল কুরআন","জালালাইন শরীফ","তাফসীরে বায়যাভী","আল-ফাওযুল কাবীর","মাআরিফুল কুরআন"],
+  "হাদীস": ["মিশকাত শরীফ","বুখারী শরীফ","মুসলিম শরীফ","তিরমিযী শরীফ","আবু দাউদ শরীফ","নাসায়ী শরীফ","ইবনে মাজাহ","তাহাবী শরীফ","মুয়াত্তা মালিক","মুয়াত্তা মুহাম্মদ","নুখবাতুল ফিকার"],
+  "মানতিক ও কালাম": ["তাইসীরুল মানতিক","শরহে তাহযীব","কুতবী","শরহে আকাইদ","মীবুযী"],
+  "ইতিহাস ও সিরাত": ["সীরাতে খাতামুল আম্বিয়া","তারিখুল ইসলাম","খিলাফতে রাশেদা","কাসাসুন নাবিয়্যীন"]
+};
+function bookSearchLinksHTML(name){
+  const a = "https://archive.org/search?query=" + encodeURIComponent(name);
+  const g = "https://www.google.com/search?q=" + encodeURIComponent(name + " pdf");
+  return `<a class="btn ghost small" href="${a}" target="_blank" rel="noopener noreferrer">🔍 Archive.org</a>
+          <a class="btn ghost small" href="${g}" target="_blank" rel="noopener noreferrer">🔍 Google</a>`;
+}
+function isSafeUrl(u){ return /^https?:\/\/[^\s]+$/i.test(u || ""); }
+function renderBooksTab(){
+  const lvl = miscState.bookLevel || "all";
+  const q = (miscState.bookQ || "").trim().toLowerCase();
+  const mine = (db.bookLinks || []).map(b => Object.assign({ mine:true }, b));
+  const all = [...mine, ...BOOK_SEED].filter(b => (lvl === "all" || b.level === lvl) && (!q || (b.t + " " + (b.note||"")).toLowerCase().includes(q)));
+  const cards = all.length ? all.map(b => `<div class="book-card" style="border:1px solid #D7DDCB;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff;">
+      <div style="font-weight:700;">${esc(b.t)}</div>
+      <div style="font-size:11.5px;color:#5B6357;margin:2px 0 6px;"><span style="background:#EEF2E8;border-radius:10px;padding:1px 8px;">${esc(b.level || "অন্যান্য")}</span>${b.mine ? ` <span style="color:#14432A;">• আমার যোগ করা</span>` : ""}</div>
+      ${b.note ? `<div style="font-size:12.5px;margin-bottom:6px;">${esc(b.note)}</div>` : ""}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <a class="btn small" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer">📄 খুলুন / ডাউনলোড</a>
+        ${b.mine ? `<button class="del-btn" data-delete="bookLinks" data-id="${b.id}" title="মুছুন">🗑</button>` : ""}
+      </div></div>`).join("") : `<div class="empty">কোনো কিতাব পাওয়া যায়নি।</div>`;
+  const sugLvl = miscState.bookSuggestLevel || Object.keys(BOOK_NAMES)[0];
+  const sug = (BOOK_NAMES[sugLvl] || []).map(n => `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px dashed #D7DDCB;padding:6px 0;">
+      <span style="font-weight:600;">${esc(n)}</span><span style="display:flex;gap:6px;">${bookSearchLinksHTML(n)}</span></div>`).join("");
+  return `
+    <div class="sec-head"><div class="badge">📚</div><div><h2>কিতাব লাইব্রেরি</h2><p>কওমী মাদরাসার কিতাবের পিডিএফ লিংক</p></div></div>
+    <div class="arch form-card">
+      <p style="font-size:12.5px;line-height:1.7;margin:0;color:#5B6357;">নিচের লিংকগুলো Internet Archive (archive.org)-এ অন্যদের আপলোড করা কিতাব। খোলার জন্য ইন্টারনেট লাগবে। ব্যবহারের আগে কিতাবের কপিরাইট/অনুমতি যাচাই করে নেবেন। নিজের কাছে থাকা যেকোনো পিডিএফ লিংক নিচের ফর্মে যোগ করে রাখা যায়।</p>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <select data-misc-field="bookLevel"><option value="all">সকল স্তর</option>${BOOK_LEVELS.map(l => `<option ${l===lvl?"selected":""}>${l}</option>`).join("")}</select>
+        <input data-misc-field="bookQ" value="${esc(miscState.bookQ||"")}" placeholder="কিতাবের নাম লিখে খুঁজুন…" style="flex:1;min-width:140px;">
+      </div>
+      <div style="padding:10px;">${cards}</div>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>➕ নিজের পিডিএফ লিংক যোগ করুন</strong>
+      <form class="grid" data-form="bookLink" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        <label class="field" style="grid-column:span 2;"><span>কিতাবের নাম</span><input name="title" required></label>
+        <label class="field"><span>স্তর/বিভাগ</span><select name="level">${BOOK_LEVELS.map(l=>`<option>${l}</option>`).join("")}</select></label>
+        <label class="field"><span>লিংক (https://…)</span><input name="url" type="url" required placeholder="https://"></label>
+        <label class="field" style="grid-column:span 2;"><span>টীকা (ঐচ্ছিক)</span><input name="note"></label>
+        <div class="btn-end" style="grid-column:span 2;"><button class="btn" type="submit">💾 সংরক্ষণ</button></div>
+      </form>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>🔍 কিতাবের নাম ধরে PDF খুঁজুন</strong>
+      <div style="margin:8px 0;"><select data-misc-field="bookSuggestLevel">${Object.keys(BOOK_NAMES).map(l=>`<option ${l===sugLvl?"selected":""}>${l}</option>`).join("")}</select></div>
+      ${sug}
     </div>`;
 }
 
@@ -1487,16 +2212,14 @@ function printTabulation(isMerit){
   const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
   <style>
     body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;color:#22281F;padding:20px 26px;}
-    .lh{text-align:center;border-bottom:3px solid #14432A;padding-bottom:12px;margin-bottom:18px;}
-    .lh img{width:52px;height:52px;object-fit:contain;display:block;margin:0 auto 6px;}
-    .lh h1{margin:0;font-size:19px;color:#14432A;} .lh p{margin:4px 0 0;color:#5B6357;font-size:12px;}
+    ${FANCY_HEADER_CSS}
     .doc-title{text-align:center;font-size:15px;font-weight:700;margin-bottom:16px;}
     table{width:100%;border-collapse:collapse;font-size:12px;}
     th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;}
     th{background:#EEF2E8;}
     @media print{ body{padding:10mm 12mm;} }
   </style></head><body>
-    <div class="lh"><img src="${getBrandLogo()}" alt="লোগো"><h1>${esc(getBrandTitle())}</h1><p>${esc(getBrandSub())}</p></div>
+    ${fancyHeaderHTML()}
     <div class="doc-title">${esc(title)}</div>
     <table><thead><tr>${headCols}</tr></thead><tbody>${bodyRows}</tbody></table>
   </body></html>`;
@@ -1505,7 +2228,7 @@ function printTabulation(isMerit){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 function renderResultsTab(){
@@ -2363,7 +3086,11 @@ function renderBrandingSettingsTab(){
     <div class="arch form-card">
       <form class="grid" data-form="brandingConfig">
         <label class="field" style="grid-column:span 2;"><span>মাদরাসার নাম</span><input name="title" value="${esc(cfg.title || DEFAULT_LETTERHEAD_TITLE)}" required></label>
+        <label class="field" style="grid-column:span 2;"><span>মাদরাসার নাম (আরবি — বাংলা নামের উপরে ছাপা হবে; ফাঁকা রাখলে আরবি নাম আসবে না)</span><input name="arabic" dir="rtl" lang="ar" style="font-family:'Aref Ruqaa','Amiri',serif;font-size:20px;" value="${esc(cfg.arabic === undefined ? DEFAULT_LETTERHEAD_ARABIC : (cfg.arabic||""))}"></label>
         <label class="field" style="grid-column:span 2;"><span>ঠিকানা</span><input name="sub" value="${esc(cfg.sub || DEFAULT_LETTERHEAD_SUB)}" required></label>
+        <label class="field"><span>বাংলা নামের আকার (%) — ১০০ = স্বাভাবিক, ছোট করতে ৮০, বড় করতে ১২০ লিখুন</span><input name="titleScale" type="number" min="50" max="250" value="${esc(cfg.titleScale || 100)}"></label>
+        <label class="field"><span>আরবি নামের আকার (%) — ১০০ = স্বাভাবিক, বাড়াতে ১২০/১৫০ লিখুন</span><input name="arabicScale" type="number" min="50" max="250" value="${esc(cfg.arabicScale || 100)}"></label>
+        <label class="field"><span>স্থাপিত সাল (নোটিসে ছাপা হবে; ফাঁকা রাখলে আসবে না)</span><input name="est" value="${esc(cfg.est === undefined ? "১৯৪১" : cfg.est)}"></label>
         <label class="field" style="grid-column:span 2;"><span>লোগো (ঐচ্ছিক)</span>
           <div id="brandLogoPreviewWrap" style="margin-bottom:8px;">
             <img id="brandLogoPreview" src="${cfg.logo || DEFAULT_LOGO_DATA_URI}" style="width:64px;height:64px;border-radius:10px;object-fit:contain;border:1px solid var(--border);background:#fff;">
@@ -2731,7 +3458,8 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     if(!amount) return;
     db[cfg.key].unshift({
       id:uid(), no:fd.get("no")||"", date:fd.get("date")||todayISO(),
-      party:fd.get("party")||"", extra:fd.get("extra")||"", desc:fd.get("desc")||"", amount
+      party:fd.get("party")||"", extra:fd.get("extra")||"", desc:fd.get("desc")||"", amount,
+      donorFather:fd.get("donorFather")||"", donorAddress:fd.get("donorAddress")||""
     });
     logActivity("যোগ", `${cfg.title}: ${fd.get("party")||"—"} — ${taka(amount)} (${fmtDate(fd.get("date")||todayISO())})`);
     saveDB(); renderContent(); return;
@@ -2742,6 +3470,7 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
       const s = db.students.find(x=>x.id===editingStudentId);
       if(s){
         s.admissionNo = fd.get("admissionNo")||"";
+        s.seatNo = fd.get("seatNo")||"";
         s.name = fd.get("name");
         s.fatherName = fd.get("fatherName")||"";
         s.motherName = fd.get("motherName")||"";
@@ -2766,7 +3495,7 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     const admDate = fd.get("date")||todayISO();
     const newSid = generateStudentId(admDate);
     db.students.unshift({
-      id:uid(), sid:newSid, admissionNo:fd.get("admissionNo")||"", name:fd.get("name"),
+      id:uid(), sid:newSid, admissionNo:fd.get("admissionNo")||"", seatNo:fd.get("seatNo")||"", name:fd.get("name"),
       fatherName:fd.get("fatherName")||"", dob:fd.get("dob")||"", className:fd.get("className"),
       motherName:fd.get("motherName")||"", guardianName:fd.get("guardianName")||"", guardianMobile:fd.get("guardianMobile")||"",
       birthRegNo:fd.get("birthRegNo")||"", prevSchool:fd.get("prevSchool")||"",
@@ -2791,14 +3520,54 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     saveDB(); renderContent(); return;
   }
   if(type==="classRoutine"){
-    if(!fd.get("subject")) return;
-    db.classRoutine.unshift({ id:uid(), className:fd.get("className"), day:fd.get("day"), time:fd.get("time")||"", subject:fd.get("subject"), teacher:fd.get("teacher")||"" });
+    const subject = (fd.get("subject")||"").trim();
+    const className = fd.get("className");
+    if(!subject || subject==="__new__" || !className || className==="__new__"){ alert("শ্রেণি ও বিষয় নির্বাচন করুন।"); return; }
+    const day = fd.get("day") || "প্রতিদিন";
+    const period = parseInt(fd.get("period"),10) || 1;
+    const time = routineCfg().periods[period-1] || "";
+    db.classRoutine = db.classRoutine.filter(r => !(r.className===className && (r.day||"প্রতিদিন")===day && Number(r.period)===period));
+    db.classRoutine.unshift({ id:uid(), className, day, period, time, subject, teacher:fd.get("teacher")||"" });
     saveDB(); renderContent(); return;
   }
   if(type==="examRoutine"){
-    if(!fd.get("subject")) return;
-    db.examRoutine.unshift({ id:uid(), examName:fd.get("examName")||"", className:fd.get("className"), subject:fd.get("subject"), date:fd.get("date")||todayISO(), time:fd.get("time")||"" });
+    const subject = (fd.get("subject")||"").trim();
+    const className = fd.get("className");
+    const examName = fd.get("examName");
+    if(!subject || subject==="__new__" || !className || className==="__new__" || !examName || examName==="__new__"){ alert("পরীক্ষার নাম, শ্রেণি ও বিষয় নির্বাচন করুন।"); return; }
+    const date = fd.get("date")||todayISO(), time = fd.get("time")||"";
+    db.examRoutine = db.examRoutine.filter(r => !(r.examName===examName && r.className===className && r.date===date && (r.time||"")===time));
+    db.examRoutine.unshift({ id:uid(), examName, className, subject, date, time });
+    miscState.examGridName = examName;
     saveDB(); renderContent(); return;
+  }
+  if(type==="bookLink"){
+    const url = (fd.get("url")||"").trim();
+    if(!isSafeUrl(url)){ alert("সঠিক লিংক দিন (https:// দিয়ে শুরু)।"); return; }
+    db.bookLinks = db.bookLinks || [];
+    db.bookLinks.unshift({ id:uid(), t:(fd.get("title")||"").trim(), level:fd.get("level")||"অন্যান্য", url, note:(fd.get("note")||"").trim() });
+    saveDB(); renderContent(); return;
+  }
+  if(type==="routineConfig"){
+    const cur = db.routineConfig || {};
+    const next = Object.assign({}, cur);
+    if(fd.has("p1")){ next.periods = [1,2,3,4,5,6,7,8].map(i => (fd.get("p"+i)||"").trim()); }
+    ["classTitle","classYearText","examYearText","examNote","signLeftName","signLeftTitle","signRightName","signRightTitle"].forEach(k => { if(fd.has(k)) next[k] = (fd.get(k)||"").trim(); });
+    db.routineConfig = next;
+    saveDB(); renderContent(); alert("সেটিং সংরক্ষণ করা হয়েছে।"); return;
+  }
+  if(type==="notices"){
+    const body = (fd.get("body")||"").trim();
+    if(!body){ alert("নোটিসের বিবরণ লিখুন।"); return; }
+    const classes = fd.getAll("feeClass"), amts = fd.getAll("feeAmt");
+    const fees = classes.map((c,i)=>({cls:c, amt:amts[i]||""})).filter(f=>f.cls && f.amt!=="");
+    const n = { id:uid(), date:fd.get("date")||todayISO(), ref:(fd.get("ref")||"").trim(), subject:(fd.get("subject")||"").trim(), body, fees,
+      signerName:(fd.get("signerName")||"").trim(), signerTitle:fd.get("signerTitle")||"", order: fd.get("order")==="on" };
+    db.notices = db.notices || [];
+    db.notices.unshift(n);
+    logActivity("নোটিস তৈরি", (n.subject || body).slice(0,60));
+    saveDB(); renderContent();
+    printNotice(n); return;
   }
   if(type==="results"){
     if(!fd.get("studentId") || !fd.get("subject")) return;
@@ -2951,6 +3720,7 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
 const DEFAULT_LOGO_DATA_URI = "data:image/jpeg;base64,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";
 const DEFAULT_LETTERHEAD_TITLE = "বোররচর কাচারী বাজার ইসলামিয়া হুসাইনিয়া মাদরাসা";
 const DEFAULT_LETTERHEAD_SUB = "ময়মনসিংহ সদর, ময়মনসিংহ";
+const DEFAULT_LETTERHEAD_ARABIC = "المدرسة الاسلامية الحسينية بررصر كصرى بازار";
 
 /* ============================ মাদরাসার নাম/ঠিকানা/লোগো সেটিংস ============================ */
 const BRANDING_CONFIG_KEY = "madrasaBrandingConfig_v1";
@@ -2964,12 +3734,61 @@ function getBrandingConfig(){
 function saveBrandingConfig(cfg){ localStorage.setItem(BRANDING_CONFIG_KEY, JSON.stringify(cfg)); }
 function getBrandTitle(){ const c = getBrandingConfig(); return c.title || DEFAULT_LETTERHEAD_TITLE; }
 function getBrandSub(){ const c = getBrandingConfig(); return c.sub || DEFAULT_LETTERHEAD_SUB; }
+function titleStyle(px){ const sc = (Number(getBrandingConfig().titleScale) || 100) / 100; return `style="font-size:${Math.round(px * sc * 10) / 10}px"`; }
+function getBrandArabic(){ const c = getBrandingConfig(); return (c.arabic === undefined) ? DEFAULT_LETTERHEAD_ARABIC : (c.arabic || ""); }
+const AR_FONT_LINK = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Aref+Ruqaa:wght@400;700&display=swap">';
+const FANCY_HEADER_CSS = `
+    .fh{display:flex;align-items:center;gap:10px;color:#fff;background:linear-gradient(135deg,#0E3320 0%,#14432A 45%,#1F6B42 100%);border-radius:12px;padding:10px 14px;border-bottom:4px solid #C9A227;box-shadow:0 0 0 2px #14432A;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .fh-logo{width:68px;height:68px;flex-shrink:0;background:#fff;border:3px solid #C9A227;border-radius:50%;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+    .fh-logo img{width:92%;height:92%;object-fit:contain;display:block;margin:0;}
+    .fh-logo.ghost{visibility:hidden;}
+    .fh-text{flex:1;text-align:center;}
+    .fh-name{font-size:23px;line-height:1.35;font-weight:800;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);}
+    .fh-sub{margin-top:3px;color:#F1DC8B;font-size:12.5px;line-height:1.5;font-weight:500;}
+    .fh-rule{display:flex;align-items:center;gap:10px;margin:6px 0 4px;color:#C9A227;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .fh-rule::before,.fh-rule::after{content:"";flex:1;height:2px;background:linear-gradient(90deg,transparent,#C9A227,transparent);}
+    .fh-title{text-align:center;margin:2px 0 8px;}
+    .fh-title span{display:inline-block;font-size:17px;font-weight:700;color:#14432A;background:#FBF3D5;border:1.5px solid #C9A227;border-radius:16px;padding:1px 26px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .fh.compact{padding:6px 12px;} .fh.compact .fh-logo{width:46px;height:46px;border-width:2px;} .fh.compact .fh-name{font-size:19px;}
+    .fh.compact + .fh-rule{margin:3px 0 2px;} .fh.compact ~ .fh-title span{font-size:15px;}
+`;
+function fancyHeaderHTML(opts){
+  opts = opts || {};
+  const compact = !!opts.compact;
+  const logo = getBrandLogo();
+  return `<div class="fh${compact ? " compact" : ""}"><div class="fh-logo"><img src="${logo}" alt="লোগো"></div>
+    <div class="fh-text">${brandArabicHTML(compact ? 24 : 30, "#FFF2B8", "text-shadow:0 1px 2px rgba(0,0,0,.35);")}<div class="fh-name" ${titleStyle(compact ? 19 : 23)}>${esc(getBrandTitle())}</div>${compact ? "" : `<div class="fh-sub">${esc(getBrandSub())}</div>`}</div>
+    <div class="fh-logo ghost"></div></div>
+    <div class="fh-rule"><span>✦</span></div>${opts.title ? `<div class="fh-title"><span>${esc(opts.title)}</span></div>` : ""}`;
+}
+/* আরবি নাম (Aref Ruqaa) — বাংলা নামের উপরে বসানোর জন্য */
+function brandArabicHTML(size, color, extra){
+  const t = getBrandArabic();
+  if(!t) return "";
+  const sc = (Number(getBrandingConfig().arabicScale) || 100) / 100;
+  return AR_FONT_LINK + `<div class="ar-brand" dir="rtl" lang="ar" style="font-family:'Aref Ruqaa','Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:${Math.round((size||30)*sc)}px;font-weight:700;line-height:1.55;color:${color||'#14432A'};text-align:center;margin:0 0 2px;${extra||''}">${esc(t)}</div>`;
+}
+/* ফন্ট লোড হওয়ার পর প্রিন্ট ডায়ালগ খোলে */
+function safePrint(win){
+  let done = false;
+  const go = () => { if(done) return; done = true; try{ win.focus(); win.print(); }catch(e){} };
+  const afterLoad = () => {
+    try{ const f = win.document.fonts; if(f && f.ready){ f.ready.then(()=>setTimeout(go,150)); return; } }catch(e){}
+    setTimeout(go,300);
+  };
+  try{
+    if(win.document.readyState === "complete") afterLoad(); else win.addEventListener("load", afterLoad);
+  }catch(e){ setTimeout(go,600); }
+  setTimeout(go,5000);
+}
 function getBrandLogo(){ const c = getBrandingConfig(); return c.logo || DEFAULT_LOGO_DATA_URI; }
 function applyBrandingToShell(){
   const titleEl = document.getElementById("sidebarBrandTitle");
   const subEl = document.getElementById("sidebarBrandSub");
-  if(titleEl) titleEl.textContent = getBrandTitle();
+  if(titleEl){ titleEl.textContent = getBrandTitle(); titleEl.style.fontSize = Math.round(17 * ((Number(getBrandingConfig().titleScale) || 100) / 100) * 10) / 10 + "px"; }
   if(subEl) subEl.textContent = getBrandSub();
+  const arEl = document.getElementById("sidebarBrandArabic");
+  if(arEl){ arEl.textContent = getBrandArabic(); arEl.style.display = getBrandArabic() ? "" : "none"; arEl.style.fontSize = Math.round(25 * ((Number(getBrandingConfig().arabicScale) || 100) / 100)) + "px"; }
   document.title = getBrandTitle() + " — ব্যবস্থাপনা সফটওয়্যার";
   const logoContainerEl = document.getElementById("sidebarLogoContainer");
   if(logoContainerEl) logoContainerEl.innerHTML = `<img src="${getBrandLogo()}" alt="লোগো" style="width:70px;height:70px;object-fit:contain;margin-bottom:6px;border-radius:8px;">`;
@@ -2994,6 +3813,107 @@ function fallbackCopyMessage(msg){
   } else {
     alert("মেসেজটি কপি করে পাঠান:\n\n"+msg);
   }
+}
+
+const BN_WORDS_0_99 = ["শূন্য","এক","দুই","তিন","চার","পাঁচ","ছয়","সাত","আট","নয়","দশ","এগার","বার","তের","চৌদ্দ","পনের","ষোল","সতের","আঠার","উনিশ","বিশ","একুশ","বাইশ","তেইশ","চব্বিশ","পঁচিশ","ছাব্বিশ","সাতাশ","আটাশ","ঊনত্রিশ","ত্রিশ","একত্রিশ","বত্রিশ","তেত্রিশ","চৌত্রিশ","পঁয়ত্রিশ","ছত্রিশ","সাঁইত্রিশ","আটত্রিশ","ঊনচল্লিশ","চল্লিশ","একচল্লিশ","বিয়াল্লিশ","তেতাল্লিশ","চুয়াল্লিশ","পঁয়তাল্লিশ","ছেচল্লিশ","সাতচল্লিশ","আটচল্লিশ","ঊনপঞ্চাশ","পঞ্চাশ","একান্ন","বায়ান্ন","তিপ্পান্ন","চুয়ান্ন","পঞ্চান্ন","ছাপ্পান্ন","সাতান্ন","আটান্ন","ঊনষাট","ষাট","একষট্টি","বাষট্টি","তেষট্টি","চৌষট্টি","পঁয়ষট্টি","ছেষট্টি","সাতষট্টি","আটষট্টি","ঊনসত্তর","সত্তর","একাত্তর","বাহাত্তর","তিয়াত্তর","চুয়াত্তর","পঁচাত্তর","ছিয়াত্তর","সাতাত্তর","আটাত্তর","ঊনআশি","আশি","একাশি","বিরাশি","তিরাশি","চুরাশি","পঁচাশি","ছিয়াশি","সাতাশি","আটাশি","ঊননব্বই","নব্বই","একানব্বই","বিরানব্বই","তিরানব্বই","চুরানব্বই","পঁচানব্বই","ছিয়ানব্বই","সাতানব্বই","আটানব্বই","নিরানব্বই"];
+function bnIntWords(n){
+  n = Math.floor(Math.abs(n));
+  if(n===0) return BN_WORDS_0_99[0];
+  const parts = [];
+  const units = [[10000000,"কোটি"],[100000,"লক্ষ"],[1000,"হাজার"],[100,"শত"]];
+  for(const [v,name] of units){
+    if(n>=v){ parts.push(bnIntWords(Math.floor(n/v))+" "+name); n = n % v; }
+  }
+  if(n>0) parts.push(BN_WORDS_0_99[n]);
+  return parts.join(" ");
+}
+function amountInWordsBn(amount){
+  const num = Number(amount||0);
+  if(!num) return "";
+  const taka_ = Math.floor(num);
+  const paisa = Math.round((num - taka_)*100);
+  let out = bnIntWords(taka_) + " টাকা";
+  if(paisa>0) out += " " + bnIntWords(paisa) + " পয়সা";
+  return out + " মাত্র";
+}
+
+function printDonationReceipts(list){
+  if(!list || !list.length) return;
+  const dots = '<span class="v">&nbsp;</span>';
+  const logo = getBrandLogo();
+  const cards = list.map(r => {
+    const blank = !!r.blank;
+    const val = t => (!blank && t) ? `<span class="v">${esc(t)}</span>` : dots;
+    const amt = (!blank && r.amount) ? bn(Number(r.amount).toLocaleString("en-IN")) : "&nbsp;";
+    const words = (!blank && r.amount) ? esc(amountInWordsBn(r.amount)) : "&nbsp;";
+    return `<div class="rc">
+      <div class="edge"></div>
+      <div class="wm"><img src="${logo}" alt=""></div>
+      <svg class="minaret" viewBox="0 0 60 150" xmlns="http://www.w3.org/2000/svg"><g fill="#8A7A5A" opacity=".55"><rect x="26" y="0" width="8" height="14" rx="3"/><rect x="20" y="14" width="20" height="8"/><rect x="18" y="22" width="24" height="30" rx="4"/><rect x="12" y="52" width="36" height="8" rx="2"/><rect x="15" y="60" width="30" height="34"/><rect x="8" y="94" width="44" height="9" rx="2"/><rect x="12" y="103" width="36" height="47"/></g><g fill="#fff" opacity=".7"><rect x="24" y="28" width="5" height="18" rx="2"/><rect x="31" y="28" width="5" height="18" rx="2"/><rect x="22" y="66" width="5" height="22" rx="2"/><rect x="33" y="66" width="5" height="22" rx="2"/></g></svg>
+      <div class="in">
+        <div class="bis">بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ</div>
+        <div class="hd">
+          <div class="hd-logo"><img src="${logo}" alt="লোগো"></div>
+          <div class="hd-text">${brandArabicHTML(28,"#14432A")}<div class="hd-name" ${titleStyle(23)}>${esc(getBrandTitle())}</div><div class="hd-sub">${esc(getBrandSub())}</div></div>
+        </div>
+        <div class="banner-row"><span class="dt"></span><span class="banner">অনুদান গ্রহণের রশিদ</span><span class="dt"></span></div>
+        <div class="meta">
+          <div class="no"><span class="l">ক্রমিক নং</span><span class="numv">${blank ? (r.no?esc(bn(r.no)):"&nbsp;") : (r.no?esc(bn(r.no)):"&nbsp;")}</span></div>
+          <div class="rf date"><span class="l">তারিখ :</span>${val(r.date?fmtDate(r.date):"")}</div>
+        </div>
+        <div class="rf"><span class="l">অনুদান দাতার নাম :</span>${val(r.party)}</div>
+        <div class="rf"><span class="l">পিতার নাম :</span>${val(r.donorFather)}</div>
+        <div class="rf"><span class="l">ঠিকানা :</span>${val(r.donorAddress)}</div>
+        <div class="rf"><span class="l">অনুদানের বিবরণ :</span>${val(r.desc)}</div>
+        <div class="amt"><span class="l">অনুদানের পরিমাণ (অংকে) :</span><span class="box">${amt}</span><span class="l">টাকা।</span></div>
+        <div class="rf"><span class="l">কথায় :</span><span class="v">${words}</span></div>
+        <div class="sig"><div>মুহতামিমের স্বাক্ষর</div><div>আদায়কারীর স্বাক্ষর</div></div>
+      </div>
+    </div>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>অনুদান রশিদ</title>
+  <style>
+    @page{size:A4;margin:8mm 10mm;}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;color:#1F2A1C;margin:0;display:flex;flex-direction:column;gap:6mm;align-items:center;}
+    .rc{position:relative;width:190mm;height:132mm;border:2.5px solid #14432A;border-radius:8px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;
+      background:linear-gradient(160deg,#EAF6E1 0%,#D5ECCB 60%,#E4F3DA 100%);}
+    .rc::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(255,255,255,.35) 0 1px,transparent 1px 4px);pointer-events:none;}
+    .rc::after{content:"";position:absolute;inset:4px;border:1.2px solid #C9A227;border-radius:5px;pointer-events:none;}
+    .edge{position:absolute;left:0;top:0;bottom:0;width:6mm;background:linear-gradient(180deg,#2456A6,#1B3F80);}
+    .wm{position:absolute;left:6mm;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+    .wm img{width:75mm;height:75mm;object-fit:contain;opacity:.10;margin-top:8mm;}
+    .minaret{position:absolute;left:9mm;bottom:3mm;height:22mm;width:9mm;}
+    .in{position:relative;z-index:1;padding:4mm 8mm 4mm 12mm;height:100%;display:flex;flex-direction:column;}
+    .bis{text-align:center;font-size:13px;color:#14432A;font-family:'Amiri','Traditional Arabic','Noto Naskh Arabic',serif;line-height:1.2;}
+    .hd{display:flex;align-items:center;gap:3mm;margin-top:1mm;}
+    .hd-logo{width:19mm;height:19mm;flex-shrink:0;background:#fff;border:2px solid #C9A227;border-radius:50%;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+    .hd-logo img{width:92%;height:92%;object-fit:contain;}
+    .hd-text{flex:1;text-align:center;}
+    .hd-name{font-size:23px;line-height:1.25;font-weight:800;color:#1D3E96;}
+    .hd-sub{font-size:11.5px;color:#243024;margin-top:1mm;line-height:1.4;font-weight:500;}
+    .banner-row{display:flex;align-items:center;justify-content:center;gap:3mm;margin:2.5mm 0 2mm;}
+    .banner{background:linear-gradient(180deg,#1F8A3F,#146B2E);color:#fff;font-weight:800;font-size:15px;padding:1.2mm 9mm;border-radius:14px;border:2px solid #F0A22A;letter-spacing:.3px;}
+    .dt{width:22mm;height:2.2mm;background:radial-gradient(circle,#F0A22A 0 1.1mm,transparent 1.2mm) 0 0/4.4mm 2.2mm repeat-x;}
+    .meta{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1mm;}
+    .no{display:flex;align-items:flex-end;gap:2mm;} .no .l{font-size:13px;}
+    .numv{font-size:22px;font-weight:800;min-width:26mm;border-bottom:1px dotted #333;line-height:1.1;padding:0 2mm;}
+    .rf{display:flex;align-items:flex-end;gap:2mm;margin-top:2.6mm;}
+    .rf.date{margin-top:0;width:62mm;}
+    .l{font-size:13.5px;white-space:nowrap;color:#1F2A1C;}
+    .v{flex:1;border-bottom:1px dotted #333;min-height:5.5mm;padding:0 2mm;font-weight:600;font-size:13.5px;}
+    .amt{display:flex;align-items:center;gap:2mm;margin-top:2.6mm;}
+    .box{display:inline-block;min-width:44mm;height:9mm;border:1.5px solid #14432A;background:#fff;border-radius:2px;padding:0 3mm;font-size:17px;font-weight:800;line-height:9mm;text-align:center;}
+    .sig{display:flex;justify-content:space-between;margin-top:auto;padding-left:26mm;font-size:12.5px;}
+    .sig div{border-top:1px solid #333;padding-top:1.2mm;min-width:48mm;text-align:center;}
+    @media screen{ body{background:#eee;padding:10px;} .rc{box-shadow:0 1px 6px rgba(0,0,0,.25);} }
+  </style></head><body>${cards}</body></html>`;
+  const win = window.open("", "_blank");
+  if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  safePrint(win);
 }
 
 function printSingleReceipt(kind, id){
@@ -3024,9 +3944,7 @@ function printSingleReceipt(kind, id){
   const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(heading)}</title>
   <style>
     body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;color:#22281F;padding:30px 40px;}
-    .lh{text-align:center;border-bottom:3px solid #14432A;padding-bottom:14px;margin-bottom:24px;}
-    .lh img{width:56px;height:56px;object-fit:contain;display:block;margin:0 auto 6px;}
-    .lh h1{margin:0;font-size:20px;color:#14432A;} .lh p{margin:4px 0 0;color:#5B6357;font-size:12.5px;}
+    ${FANCY_HEADER_CSS}
     .doc-title{text-align:center;font-size:17px;font-weight:700;margin-bottom:22px;text-decoration:underline;}
     .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #ccc;font-size:14px;}
     .row span:first-child{color:#5B6357;}
@@ -3035,7 +3953,7 @@ function printSingleReceipt(kind, id){
     .sig div{border-top:1px solid #333;padding-top:6px;width:170px;text-align:center;}
     @media print{ body{padding:14mm 16mm;} }
   </style></head><body>
-    <div class="lh"><img src="${getBrandLogo()}" alt="লোগো"><h1>${esc(getBrandTitle())}</h1><p>${esc(getBrandSub())}</p></div>
+    ${fancyHeaderHTML()}
     <div class="doc-title">${esc(heading)}</div>
     <div class="row"><span>নং</span><span>${esc(no||"-")}</span></div>
     <div class="row"><span>তারিখ</span><span>${fmtDate(dateStr)}</span></div>
@@ -3050,7 +3968,7 @@ function printSingleReceipt(kind, id){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 function printAdmissionForms(ids){
@@ -3063,7 +3981,7 @@ function printAdmissionForms(ids){
       <div class="content">
       <div class="lh">
         <div class="lh-logo"><img src="${getBrandLogo()}" alt="লোগো"></div>
-        <div class="lh-text"><h1>${esc(getBrandTitle())}</h1><p>${esc(getBrandSub())}</p></div>
+        <div class="lh-text">${brandArabicHTML(30,"#FFF2B8","text-shadow:0 1px 2px rgba(0,0,0,.35);")}<h1 ${titleStyle(24)}>${esc(getBrandTitle())}</h1><p>${esc(getBrandSub())}</p></div>
         <div class="lh-logo ghostbox"></div>
       </div>
       <div class="lh-rule"><span>✦</span></div>
@@ -3148,8 +4066,8 @@ function printAdmissionForms(ids){
     .lh p{margin:5px 0 0;color:#F1DC8B;font-size:13px;line-height:1.5;font-weight:500;}
     .lh-rule{display:flex;align-items:center;gap:10px;margin:5px 0 2px;color:#C9A227;font-size:13px;}
     .lh-rule::before,.lh-rule::after{content:"";flex:1;height:2px;background:linear-gradient(90deg,transparent,#C9A227,transparent);}
-    .title-row{position:relative;text-align:center;margin-bottom:8px;min-height:104px;}
-    .ttl{display:inline-block;margin-top:34px;font-size:18px;font-weight:700;border:2px solid #C9A227;border-radius:20px;padding:5px 30px;color:#14432A;background:#FBF3D5;}
+    .title-row{position:relative;text-align:center;margin-bottom:6px;min-height:92px;}
+    .ttl{display:inline-block;margin-top:28px;font-size:18px;font-weight:700;border:2px solid #C9A227;border-radius:20px;padding:5px 30px;color:#14432A;background:#FBF3D5;}
     .photo{position:absolute;right:0;top:0;width:82px;height:98px;border:1.5px solid #333;display:flex;align-items:center;justify-content:center;font-size:11px;color:#777;text-align:center;overflow:hidden;}
     .photo img{width:100%;height:100%;object-fit:cover;}
     .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;flex-wrap:wrap;gap:6px;}
@@ -3167,10 +4085,10 @@ function printAdmissionForms(ids){
     .mbox .box{display:inline-block;width:64px;height:28px;border:1.5px solid #14432A;border-radius:5px;background:#fff;}
     .mbox .box.wide{width:110px;}
     .cmt{margin-top:9px;} .cmt .l{font-size:13px;color:#5B6357;}
-    .cmt-box{margin-top:3px;height:50px;border:1.5px solid #14432A;border-radius:6px;background:#fff;
+    .cmt-box{margin-top:3px;height:42px;border:1.5px solid #14432A;border-radius:6px;background:#fff;
       background-image:repeating-linear-gradient(transparent,transparent 16px,#B9C1AE 16px,#B9C1AE 17px);}
     .decl{font-size:12.5px;line-height:1.65;margin:4px 0 0;text-align:justify;}
-    .sig{display:flex;justify-content:space-between;gap:10px;margin-top:26px;font-size:12px;}
+    .sig{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:12px;}
     .sig div{border-top:1px solid #333;padding-top:5px;flex:1;text-align:center;}
     @media screen{ body{background:#eee;padding:10px;} .page{max-width:794px;margin:0 auto 14px;box-shadow:0 1px 6px rgba(0,0,0,.2);} }
   </style></head><body>${pages}</body></html>`;
@@ -3179,7 +4097,7 @@ function printAdmissionForms(ids){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 450);
+  safePrint(win);
 }
 
 function printIdCards(){
@@ -3189,7 +4107,7 @@ function printIdCards(){
       <div class="cwm"><img src="${getBrandLogo()}" alt=""></div>
       <div class="chd">
         <div class="chd-logo"><img src="${getBrandLogo()}" alt="লোগো"></div>
-        <div class="chd-text"><div class="chd-name">${esc(getBrandTitle())}</div><div class="chd-sub">${esc(getBrandSub())}</div></div>
+        <div class="chd-text">${brandArabicHTML(17,"#FFF2B8")}<div class="chd-name" ${titleStyle(13)}>${esc(getBrandTitle())}</div><div class="chd-sub">${esc(getBrandSub())}</div></div>
       </div>
       <div class="cbadge"><span>ছাত্র পরিচয়পত্র</span></div>
       <div class="idcard-body">
@@ -3236,7 +4154,7 @@ function printIdCards(){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 function printAdmitCards(){
@@ -3253,9 +4171,10 @@ function printAdmitCards(){
       <div class="awm"><img src="${getBrandLogo()}" alt=""></div>
       <div class="ahd">
         <div class="ahd-logo"><img src="${getBrandLogo()}" alt="লোগো"></div>
-        <div class="ahd-text"><div class="ahd-name">${esc(getBrandTitle())}</div><div class="ahd-sub">${esc(getBrandSub())}</div></div>
+        <div class="ahd-text">${brandArabicHTML(19,"#FFF2B8")}<div class="ahd-name" ${titleStyle(14)}>${esc(getBrandTitle())}</div><div class="ahd-sub">${esc(getBrandSub())}</div></div>
       </div>
       <div class="admit-title"><span>প্রবেশপত্র — ${esc(examName)}</span></div>
+      <div class="admit-ids"><div><span>ভর্তি নং</span><b>${s.admissionNo?esc(bn(s.admissionNo)):"&nbsp;"}</b></div><div><span>সিট নং</span><b>${s.seatNo?esc(bn(s.seatNo)):"&nbsp;"}</b></div></div>
       <div class="admit-body">
         <div class="admit-photo">${s.photo?`<img src="${s.photo}">`:"👤"}</div>
         <div class="admit-info">
@@ -3289,6 +4208,9 @@ function printAdmitCards(){
     .ahd-sub{font-size:10px;color:#F1DC8B;margin-top:2px;line-height:1.35;}
     .admit-title{text-align:center;margin:9px 0 10px;}
     .admit-title span{display:inline-block;font-weight:700;font-size:12.5px;color:#14432A;background:#FBF3D5;border:1.5px solid #C9A227;border-radius:12px;padding:2px 16px;}
+    .admit-ids{display:flex;gap:10px;margin:0 16px 8px;}
+    .admit-ids div{flex:1;display:flex;align-items:center;gap:6px;font-size:12px;}
+    .admit-ids b{flex:1;border:1.5px solid #14432A;border-radius:4px;padding:2px 8px;min-height:24px;background:#fff;text-align:center;font-size:14px;}
     .admit-body{display:flex;gap:10px;align-items:center;margin:0 16px 10px;text-align:left;}
     .admit-photo{width:56px;height:56px;flex-shrink:0;border:1px solid #ccc;border-radius:8px;overflow:hidden;
       display:flex;align-items:center;justify-content:center;font-size:24px;background:#EEF2E8;}
@@ -3305,7 +4227,7 @@ function printAdmitCards(){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 function stripYearFromId(id){
@@ -3454,8 +4376,7 @@ function buildRegisterTableBlock(students, dataArr, personKey, idKey, idLabel, p
   const dayAbsentFooter = dayAbsentTotals.map(a=>`<td class="day" style="font-weight:700;">${bn(a)}</td>`).join("");
   const leadColspan = showClassCol ? 4 : 3;
   return `<div class="reg-page">
-    <img src="${getBrandLogo()}" alt="লোগো" class="reg-logo">
-    <h1>${esc(getBrandTitle())}</h1><p class="sub">${esc(getBrandSub())} — ${esc(title)}</p>
+    ${fancyHeaderHTML({ title: title, compact: true })}
     <table>
       <thead><tr>
         <th class="serial">ক্রমিক</th>
@@ -3478,6 +4399,7 @@ function buildRegisterTableBlock(students, dataArr, personKey, idKey, idLabel, p
 }
 const REGISTER_PRINT_STYLE = `
     body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;padding:14px;}
+    ${FANCY_HEADER_CSS}
     h1{font-size:15px;color:#14432A;text-align:center;margin:0 0 4px;}
     .reg-logo{width:38px;height:38px;object-fit:contain;display:block;margin:0 auto 4px;}
     p.sub{text-align:center;color:#5B6357;font-size:11px;margin:0 0 14px;}
@@ -3524,7 +4446,7 @@ function printAttendanceRegister(kind){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 function printAllAttendanceRegistersSeparately(){
@@ -3549,7 +4471,7 @@ function printAllAttendanceRegistersSeparately(){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 function printCurrentTab(tab){
@@ -3742,10 +4664,7 @@ function printCurrentTab(tab){
   const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
   <style>
     body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;color:#22281F;padding:30px 36px;}
-    .lh{text-align:center;border-bottom:3px solid #14432A;padding-bottom:14px;margin-bottom:22px;}
-    .lh img{width:56px;height:56px;object-fit:contain;display:block;margin:0 auto 6px;}
-    .lh h1{margin:0;font-size:22px;color:#14432A;}
-    .lh p{margin:4px 0 0;color:#5B6357;font-size:13px;}
+    ${FANCY_HEADER_CSS}
     .meta{display:flex;justify-content:space-between;margin-bottom:16px;font-size:13px;color:#5B6357;}
     table{width:100%;border-collapse:collapse;font-size:13px;}
     th,td{border:1px solid #ccc;padding:7px 10px;text-align:left;}
@@ -3754,7 +4673,7 @@ function printCurrentTab(tab){
     .sig div{border-top:1px solid #333;padding-top:6px;width:180px;text-align:center;}
     @media print{ body{padding:12mm 14mm;} }
   </style></head><body>
-    <div class="lh"><img src="${getBrandLogo()}" alt="লোগো"><h1>${esc(getBrandTitle())}</h1><p>${esc(getBrandSub())}</p></div>
+    ${fancyHeaderHTML()}
     <div class="meta"><span>বিষয়: ${esc(title)}</span><span>প্রিন্টের তারিখ: ${printDate}</span></div>
     <table><thead><tr>${columns.map(c=>`<th>${esc(c.label)}</th>`).join("")}</tr></thead>
       <tbody>${bodyRows || `<tr><td colspan="${columns.length}" style="text-align:center;color:#888;">কোনো তথ্য নেই</td></tr>`}${totalsHTML}</tbody>
@@ -3767,7 +4686,7 @@ function printCurrentTab(tab){
   win.document.write(html);
   win.document.close();
   win.focus();
-  setTimeout(()=>{ win.print(); }, 350);
+  safePrint(win);
 }
 
 /* ============================ ব্যাকআপ এক্সপোর্ট/ইমপোর্ট ============================ */
@@ -3942,6 +4861,10 @@ document.addEventListener("click", function(e){
     return;
   }
 
+  if(e.target.closest('[data-action="migrate-sids"]')){
+    if(confirm("সব ছাত্রের আইডি নং ১ থেকে ক্রমানুসারে (সাল ছাড়া) বদলে যাবে। অভিভাবকদের আগের আইডি আর কাজ করবে না। নিশ্চিত?")) migrateStudentIds();
+    return;
+  }
   const backfillBtn = e.target.closest('[data-action="backfill-ids"]');
   if(backfillBtn){ backfillStudentIds(); return; }
   if(e.target.closest('[data-action="print-all-registers"]')){ printAllAttendanceRegistersSeparately(); return; }
@@ -4049,6 +4972,22 @@ document.addEventListener("click", function(e){
         copyMessageToClipboard(msg);
       }
     }
+    return;
+  }
+  const donBtn = e.target.closest("[data-donation-receipt]");
+  if(donBtn){
+    const r = db.incomeReceipts.find(x=>x.id===donBtn.dataset.donationReceipt);
+    if(r) printDonationReceipts([r]);
+    return;
+  }
+  if(e.target.closest('[data-action="print-blank-donation"]')){
+    const cnt = parseInt(prompt("কয়টি ফাঁকা অনুদান রশিদ ছাপাবেন? (প্রতি A4 পাতায় ২টি)","10"),10);
+    if(!cnt || cnt<1) return;
+    const st = prompt("শুরুর ক্রমিক নং লিখুন (ক্রমিক নং হাতে লিখতে চাইলে খালি রাখুন)","");
+    const start = parseInt(st,10);
+    const list = [];
+    for(let i=0;i<Math.min(cnt,500);i++) list.push({blank:true, no: isNaN(start)?"":String(start+i)});
+    printDonationReceipts(list);
     return;
   }
   const receiptBtn = e.target.closest("[data-receipt]");
@@ -4258,6 +5197,10 @@ document.addEventListener("submit", function(e){
       saveBrandingConfig({
         title: fd.get("title") || DEFAULT_LETTERHEAD_TITLE,
         sub: fd.get("sub") || DEFAULT_LETTERHEAD_SUB,
+        arabic: (fd.get("arabic") || "").trim(),
+        est: (fd.get("est") || "").trim(),
+        arabicScale: Math.min(250, Math.max(50, Number(fd.get("arabicScale")) || 100)),
+        titleScale: Math.min(250, Math.max(50, Number(fd.get("titleScale")) || 100)),
         logo: logoDataUrl || existing.logo || ""
       });
       applyBrandingToShell();
@@ -4411,6 +5354,7 @@ document.addEventListener("change", function(e){
 /* ============================ ইনিশিয়ালাইজ ============================ */
 applyBrandingToShell();
 renderContent();
+setTimeout(offerSidMigration, 1200);
 
 if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
   window.addEventListener("load", function(){
@@ -4418,6 +5362,80 @@ if("serviceWorker" in navigator && (location.protocol === "http:" || location.pr
   });
 }
 if(!getStoredPinHash()){ showLockOverlay("set"); } else { showLockOverlay("unlock"); if(pinLockSecondsLeft() > 0) startPinLockCountdown(); }
+
+/* ===== রুটিন/নোটিস ইভেন্ট ===== */
+document.addEventListener("change", function(e){
+  const sel = e.target.closest("select[data-addable]");
+  if(sel && sel.value === "__new__"){
+    const kind = sel.dataset.addable;
+    const label = kind==="subject" ? "নতুন বিষয়ের নাম" : kind==="class" ? "নতুন শ্রেণির নাম" : "নতুন পরীক্ষার নাম";
+    const name = (prompt(label + " লিখুন") || "").trim();
+    if(!name){ sel.selectedIndex = 0; return; }
+    if(kind==="subject"){ db.subjectList = db.subjectList || []; if(!db.subjectList.includes(name) && !DEFAULT_SUBJECTS.includes(name)) db.subjectList.push(name); }
+    if(kind==="class"){ db.routineConfig = db.routineConfig || {}; const ex = db.routineConfig.extraClasses || []; if(!CLASSES.includes(name) && !ex.includes(name)) ex.push(name); db.routineConfig.extraClasses = ex; }
+    saveDB();
+    const exists = [...sel.options].find(o => o.value === name || o.textContent === name);
+    if(exists){ sel.value = exists.value || exists.textContent; return; }
+    const o = document.createElement("option"); o.textContent = name; o.value = name;
+    sel.insertBefore(o, sel.querySelector('option[value="__new__"]'));
+    sel.value = name;
+    return;
+  }
+  const tpl = e.target.closest("select[data-notice-template]");
+  if(tpl){
+    const form = tpl.closest("form");
+    const ta = form && form.querySelector('textarea[name="body"]');
+    const text = NOTICE_TEMPLATES[tpl.value];
+    if(ta && text){
+      if(!ta.value.trim() || confirm("বর্তমান লেখা মুছে টেমপ্লেটের লেখা বসানো হবে। নিশ্চিত?")) ta.value = text;
+    }
+    const sj = form && form.querySelector('input[name="subject"]');
+    if(sj && tpl.value && !sj.value) sj.value = tpl.value.replace("নোটিস"," সংক্রান্ত নোটিস").replace("সাধারণ  সংক্রান্ত","সাধারণ");
+  }
+});
+document.addEventListener("click", function(e){
+  if(e.target.closest("[data-add-fee-row]")){
+    const box = document.getElementById("feeRows");
+    if(box) box.insertAdjacentHTML("beforeend", noticeFeeRowHTML());
+    return;
+  }
+  const rm = e.target.closest("[data-remove-fee-row]");
+  if(rm){ const row = rm.closest(".fee-row"); if(row) row.remove(); return; }
+  const np = e.target.closest("[data-notice-print]");
+  if(np){ const n = (db.notices||[]).find(x => x.id === np.dataset.noticePrint); if(n) printNotice(n); return; }
+  if(e.target.closest('[data-action="print-seat-plan"]')){ printSeatPlan(boxValues("seatPlanBox")); return; }
+  if(e.target.closest('[data-action="save-seat-numbers"]')){ saveSeatNumbers(boxValues("seatPlanBox")); return; }
+  if(e.target.closest('[data-action="print-marks-sheet"]')){ printMarksSheet(boxValues("marksBox")); return; }
+  const pc = e.target.closest('[data-action="print-class-routine"]');
+  if(pc){ printClassRoutine(miscState.routineMode || "class"); return; }
+  const pe = e.target.closest('[data-action="print-exam-routine"]');
+  if(pe){ printExamRoutine(pe.dataset.exam); return; }
+  if(e.target.closest('[data-action="assign-seats"]')){
+    const cf = miscState.admitClassFilter || "all";
+    const list = db.students.filter(s => cf === "all" || s.className === cf)
+      .sort((a,b) => (allClassNames().indexOf(a.className) - allClassNames().indexOf(b.className)) || String(a.sid||"").localeCompare(String(b.sid||"")) || String(a.name||"").localeCompare(String(b.name||""), "bn"));
+    if(!list.length){ alert("এই শ্রেণিতে কোনো ছাত্র নেই।"); return; }
+    const start = parseInt(prompt("প্রথম সিট নং কত হবে? (যেমনঃ ১)", "1"), 10);
+    if(!start || start < 1) return;
+    if(!confirm(bn(list.length) + " জন ছাত্রের সিট নং " + bn(start) + " থেকে " + bn(start + list.length - 1) + " পর্যন্ত নতুন করে বরাদ্দ হবে। নিশ্চিত?")) return;
+    list.forEach((s,i) => { s.seatNo = String(start + i); });
+    saveDB(); renderContent();
+    alert("সিট নং বরাদ্দ সম্পন্ন হয়েছে।");
+    return;
+  }
+});
+
+/* শ্রেণি বদলালে বিষয়/বইয়ের ড্রপডাউন সেই শ্রেণির তালিকা দেখায় */
+document.addEventListener("change", function(e){
+  const sel = e.target.closest('select[name="className"], select[name="cls"]');
+  if(!sel || sel.value === "__new__") return;
+  const scope = sel.closest("form") || sel.closest("[id$='Box']");
+  const subj = scope && scope.querySelector('select[name="subject"]');
+  if(!subj) return;
+  const cur = subj.value;
+  subj.innerHTML = subjectOptionsHTML("", sel.value === "all" ? "" : sel.value);
+  if(cur && [...subj.options].some(o => o.value === cur)) subj.value = cur;
+});
 </script>
 </body>
 </html>
