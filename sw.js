@@ -1,9 +1,11 @@
-const CACHE_NAME = "madrasa-app-cache-v20";
+const CACHE_NAME = "madrasa-app-cache-v28";
 const URLS_TO_CACHE = [
   "./index.html",
   "./manifest.json",
   "./app-icon-192.png",
-  "./app-icon-512.png"
+  "./app-icon-512.png",
+  "./app-icon-maskable-192.png",
+  "./app-icon-maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -29,3 +31,15 @@ self.addEventListener("activate", (event) => {
 // নেটওয়ার্ক-ফার্স্ট: অনলাইনে থাকলে সবসময় নতুন ভার্সন, অফলাইনে ক্যাশ থেকে চলবে
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+  if (req.method !== "GET") return;
+  if (new URL(req.url).origin !== self.location.origin) return;
+  event.respondWith(
+    fetch(req)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        return response;
+      })
+      .catch(() => caches.match(req).then((c) => c || caches.match("./index.html")))
+  );
+});
