@@ -183,7 +183,7 @@ function defaultDB(){
     libraryLoans:[], patronMembers:[], patronPayments:[],
     teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[],
     activityLog:[], paymentClaims:[],
-    notices:[], subjectList:[], routineConfig:{}, bookLinks:[]
+    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[]
   };
 }
 function loadDB(){
@@ -432,7 +432,7 @@ function guardianResultHTML(s){
   const batt = isBoarder ? studentBoardingAttendanceStats(s.id, y, m) : null;
   const fees = db.monthlyFees.filter(f=>f.studentId===s.id).slice(0,3);
   const bills = isBoarder ? db.boardingBills.filter(f=>f.studentId===s.id).slice(0,3) : [];
-  const results = db.results.filter(r=>r.studentId===s.id).slice(0,3);
+  const results = db.results.filter(r=>r.studentId===s.id && isResultPublished(r.examName, s.className)).slice(0,3);
   return `<div class="lock-box" style="max-width:420px;">
     <div style="text-align:center;margin-bottom:12px;">
       ${s.photo?`<img src="${s.photo}" style="width:72px;height:72px;border-radius:14px;object-fit:cover;">`:""}
@@ -2137,13 +2137,6 @@ function renderBooksTab(){
 }
 
 /* ============================ ফলাফল ============================ */
-function gradeOf(pct){
-  if(pct>=80) return ["মুমতাজ","paid"];
-  if(pct>=65) return ["জায়্যিদ জিদ্দান","paid"];
-  if(pct>=50) return ["জায়্যিদ","gold"];
-  if(pct>=33) return ["মাকবুল","gold"];
-  return ["রাসিব (অকৃতকার্য)","due"];
-}
 function resultsTableHTML(){
   const sMap = studentMap();
   let rows = db.results;
@@ -2165,80 +2158,296 @@ function resultsTableHTML(){
         <td style="text-align:center;"><button class="del-btn" data-delete="results" data-id="${r.id}">🗑</button></td></tr>`;
     }).join("")}</tbody></table>`;
 }
-function tabulationData(examName, classFilter){
-  if(!examName) return { subjects: [], rows: [] };
-  let students = classFilter === "all" ? db.students : db.students.filter(s=>s.className===classFilter);
-  const relevant = db.results.filter(r=>r.examName===examName);
-  const subjects = [...new Set(relevant.map(r=>r.subject))];
-  const rows = students.map(s=>{
-    const subjMarks = {};
-    let total = 0, fullTotal = 0, anyMark = false;
-    subjects.forEach(sub=>{
-      const rec = relevant.find(r=>r.studentId===s.id && r.subject===sub);
-      if(rec){ subjMarks[sub] = Number(rec.obtained); total += Number(rec.obtained); fullTotal += Number(rec.fullMarks||100); anyMark = true; }
-      else subjMarks[sub] = null;
+function tabulationData(){ return { subjects: [], rows: [] }; }
+/* ============================ কওমী নিয়মে ফলাফল প্রক্রিয়াকরণ ============================ */
+const RES_NUM = (v, d) => { const n = Number(v); return (v === "" || v == null || !isFinite(n)) ? d : n; };
+function resultCfg(){
+  const c = db.resultConfig || {};
+  return { mumtaz: RES_NUM(c.mumtaz,80), jiddan: RES_NUM(c.jiddan,65), jayyid: RES_NUM(c.jayyid,50), maqbul: RES_NUM(c.maqbul,33), passMark: RES_NUM(c.passMark,33) };
+}
+function divisionKey(pct, cfg){
+  cfg = cfg || resultCfg();
+  if(pct >= cfg.mumtaz) return "mumtaz";
+  if(pct >= cfg.jiddan) return "jiddan";
+  if(pct >= cfg.jayyid) return "jayyid";
+  if(pct >= cfg.maqbul) return "maqbul";
+  return "rasib";
+}
+const DIVISION_LABELS = { mumtaz:"মুমতাজ (স্টার মার্ক)", jiddan:"জায়্যিদ জিদ্দান (১ম বিভাগ)", jayyid:"জায়্যিদ (২য় বিভাগ)", maqbul:"মাকবুল (৩য় বিভাগ)", rasib:"রাসিব (অকৃতকার্য)" };
+function gradeOf(pct){
+  const k = divisionKey(pct);
+  return [DIVISION_LABELS[k], k === "rasib" ? "due" : (k === "mumtaz" || k === "jiddan") ? "paid" : "gold"];
+}
+function isResultPublished(examName, className){
+  return (db.resultPublish || []).some(p => p.examName === examName && (p.className === "all" || p.className === className));
+}
+function bnOrdinal(n){
+  const m = ["", "১ম","২য়","৩য়","৪র্থ","৫ম","৬ষ্ঠ","৭ম","৮ম","৯ম","১০ম"];
+  return n >= 1 && n <= 10 ? m[n] : bn(n) + "তম";
+}
+function computeClassResults(examName, classFilter){
+  const cfg = resultCfg();
+  const sMap = studentMap();
+  const relevant = db.results.filter(r => r.examName === examName && sMap[r.studentId]);
+  const order = allClassNames();
+  const subjByClass = {};
+  relevant.slice().reverse().forEach(r => {
+    const cn = sMap[r.studentId].className;
+    (subjByClass[cn] = subjByClass[cn] || []);
+    if(!subjByClass[cn].includes(r.subject)) subjByClass[cn].push(r.subject);
+  });
+  const rows = [];
+  db.students.filter(s => classFilter === "all" || s.className === classFilter).forEach(s => {
+    const recs = relevant.filter(r => r.studentId === s.id);
+    if(!recs.length) return;
+    const subjects = subjByClass[s.className] || [];
+    const items = subjects.map(sub => {
+      const rec = recs.find(r => r.subject === sub);
+      if(!rec) return { sub, missing: true };
+      const full = Number(rec.fullMarks) || 100;
+      const absent = !!rec.absent;
+      const got = absent ? 0 : (Number(rec.obtained) || 0);
+      const need = Math.ceil(full * cfg.passMark / 100);
+      return { sub, full, got, absent, need, failSub: absent || got < need };
     });
-    const pct = fullTotal ? (total/fullTotal*100) : 0;
-    return { student:s, subjMarks, total, fullTotal, pct, grade: gradeOf(pct)[0], anyMark };
-  }).filter(r=>r.anyMark);
-  return { subjects, rows };
+    const have = items.filter(i => !i.missing);
+    const total = have.reduce((a,i) => a + i.got, 0);
+    const fullTotal = have.reduce((a,i) => a + i.full, 0);
+    const pct = fullTotal ? total / fullTotal * 100 : 0;
+    const incomplete = items.some(i => i.missing);
+    const passed = !incomplete && !items.some(i => i.failSub);
+    const divKey = passed ? divisionKey(pct, cfg) : "rasib";
+    rows.push({ student: s, items, total, fullTotal, pct, incomplete, passed, divKey, position: null,
+      status: incomplete ? "incomplete" : (passed ? "pass" : "fail") });
+  });
+  const classes = [...new Set(rows.map(r => r.student.className))].sort((a,b) => order.indexOf(a) - order.indexOf(b));
+  const out = [];
+  classes.forEach(cn => {
+    const list = rows.filter(r => r.student.className === cn);
+    const passedList = list.filter(r => r.passed).sort((a,b) => (b.pct - a.pct) || (b.total - a.total));
+    let rank = 0, prev = null;
+    passedList.forEach((r,i) => { const k = r.pct.toFixed(4) + "|" + r.total; if(k !== prev){ rank = i + 1; prev = k; } r.position = rank; });
+    const others = list.filter(r => !r.passed).sort((a,b) => String(a.student.name).localeCompare(String(b.student.name), "bn"));
+    out.push({ className: cn, subjects: subjByClass[cn] || [], rows: [...passedList, ...others], summary: resultSummary(list) });
+  });
+  return { cfg, groups: out };
 }
-function tabulationTableHTML(){
-  const { subjects, rows } = tabulationData(miscState.tabExamName, miscState.tabClassFilter);
-  if(!miscState.tabExamName) return `<div class="empty">একটি পরীক্ষা নির্বাচন করুন।</div>`;
-  if(!rows.length) return `<div class="empty">এই পরীক্ষা ও শ্রেণির জন্য কোনো ফলাফল পাওয়া যায়নি।</div>`;
-  return `<table><thead><tr><th>ছাত্র আইডি</th><th>নাম</th><th>শ্রেণি</th>${subjects.map(s=>`<th>${esc(s)}</th>`).join("")}<th>মোট</th><th>গ্রেড</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr>
-      <td>${esc(r.student.sid||"-")}</td><td>${esc(r.student.name)}</td><td>${esc(r.student.className)}</td>
-      ${subjects.map(s=>`<td>${r.subjMarks[s]==null?"-":bn(r.subjMarks[s])}</td>`).join("")}
-      <td style="font-weight:700;">${bn(r.total)}/${bn(r.fullTotal)}</td>
-      <td style="color:${r.grade.includes('অকৃতকার্য')?'var(--due)':'var(--paid)'};font-weight:700;">${r.grade}</td>
-    </tr>`).join("")}</tbody></table>`;
+function resultSummary(list){
+  const c = { total: list.length, passed: 0, failed: 0, incomplete: 0, mumtaz: 0, jiddan: 0, jayyid: 0, maqbul: 0 };
+  list.forEach(r => {
+    if(r.status === "incomplete") c.incomplete++;
+    else if(r.passed){ c.passed++; c[r.divKey]++; }
+    else c.failed++;
+  });
+  const counted = c.passed + c.failed;
+  c.rate = counted ? Math.round(c.passed / counted * 1000) / 10 : 0;
+  return c;
 }
-function printTabulation(isMerit){
-  const examName = miscState.tabExamName;
-  if(!examName){ alert("প্রথমে একটি পরীক্ষার নাম নির্বাচন করুন।"); return; }
-  let { subjects, rows } = tabulationData(examName, miscState.tabClassFilter);
-  if(!rows.length){ alert("কোনো ফলাফল পাওয়া যায়নি।"); return; }
-  const title = isMerit ? "মেধা তালিকা — " + examName : "নম্বরপত্র — " + examName;
-  if(isMerit) rows = rows.slice().sort((a,b)=>b.total-a.total);
-  const headCols = isMerit
-    ? `<th>ক্রম</th><th>ছাত্র আইডি</th><th>নাম</th><th>শ্রেণি</th><th>মোট নম্বর</th><th>গ্রেড</th>`
-    : `<th>ছাত্র আইডি</th><th>নাম</th><th>শ্রেণি</th>${subjects.map(s=>`<th>${esc(s)}</th>`).join("")}<th>মোট</th><th>গ্রেড</th>`;
-  const bodyRows = rows.map((r,idx)=> isMerit
-    ? `<tr><td>${bn(idx+1)}</td><td>${esc(r.student.sid||"-")}</td><td>${esc(r.student.name)}</td><td>${esc(r.student.className)}</td><td>${bn(r.total)}/${bn(r.fullTotal)}</td><td>${esc(r.grade)}</td></tr>`
-    : `<tr><td>${esc(r.student.sid||"-")}</td><td>${esc(r.student.name)}</td><td>${esc(r.student.className)}</td>${subjects.map(s=>`<td>${r.subjMarks[s]==null?"-":bn(r.subjMarks[s])}</td>`).join("")}<td>${bn(r.total)}/${bn(r.fullTotal)}</td><td>${esc(r.grade)}</td></tr>`
-  ).join("");
-  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
+function statusLabel(r){ return r.status === "incomplete" ? "নম্বর বাকি" : r.passed ? "উত্তীর্ণ" : "অনুত্তীর্ণ"; }
+function divisionShort(r){ return r.status === "incomplete" ? "—" : (r.passed ? DIVISION_LABELS[r.divKey] : "রাসিব"); }
+function resultDocShell(title, bodyHTML, orientation, extraCss){
+  return `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
   <style>
-    body{font-family:'Noto Sans Bengali','Nirmala UI',Arial,sans-serif;color:#22281F;padding:20px 26px;}
+    @page{size:A4 ${orientation};margin:8mm 10mm;}
     ${FANCY_HEADER_CSS}
-    .doc-title{text-align:center;font-size:15px;font-weight:700;margin-bottom:16px;}
-    table{width:100%;border-collapse:collapse;font-size:12px;}
-    th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;}
-    th{background:#EEF2E8;}
-    @media print{ body{padding:10mm 12mm;} }
-  </style></head><body>
-    ${fancyHeaderHTML()}
-    <div class="doc-title">${esc(title)}</div>
-    <table><thead><tr>${headCols}</tr></thead><tbody>${bodyRows}</tbody></table>
-  </body></html>`;
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#1F2A1C;margin:0;}
+    table{width:100%;border-collapse:collapse;}
+    th,td{border:1.3px solid #333;padding:5px 6px;text-align:center;font-size:13px;}
+    th{background:#E8F5DF;font-weight:700;}
+    td.l{text-align:left;} .red{color:#B3261E;font-weight:700;}
+    th.vt{vertical-align:bottom;padding:6px 3px;width:30px;}
+    th.vt span{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;white-space:nowrap;line-height:1.25;font-size:12.5px;max-height:48mm;}
+    th.vt .fm{font-size:10px;font-weight:600;color:#555;margin-top:4px;}
+    thead{display:table-header-group;} tr{page-break-inside:avoid;}
+    .sect{page-break-after:always;} .sect:last-child{page-break-after:auto;}
+    .summ{margin:8px 0;font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;}
+    .summ b{color:#14432A;}
+    .signs{display:flex;justify-content:space-between;margin-top:34px;font-size:13px;page-break-inside:avoid;}
+    .signs div{border-top:1px solid #000;padding-top:3px;min-width:46mm;text-align:center;}
+    ${extraCss || ""}
+    @media screen{ body{padding:12px;background:#eee;} .sect,.ms{background:#fff;margin-bottom:12px;padding:10px;} }
+  </style></head><body>${bodyHTML}</body></html>`;
+}
+function openResultDoc(html){
   const win = window.open("", "_blank");
   if(!win){ alert("প্রিন্ট উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
   win.document.write(html);
   win.document.close();
-  win.focus();
   safePrint(win);
 }
-
+function summaryLineHTML(s){
+  return `<div class="summ"><span>পরীক্ষার্থী: <b>${bn(s.total)}</b></span><span>উত্তীর্ণ: <b>${bn(s.passed)}</b></span><span>অনুত্তীর্ণ: <b>${bn(s.failed)}</b></span>
+    ${s.incomplete ? `<span>নম্বর বাকি: <b>${bn(s.incomplete)}</b></span>` : ""}
+    <span>মুমতাজ: <b>${bn(s.mumtaz)}</b></span><span>জায়্যিদ জিদ্দান: <b>${bn(s.jiddan)}</b></span><span>জায়্যিদ: <b>${bn(s.jayyid)}</b></span><span>মাকবুল: <b>${bn(s.maqbul)}</b></span>
+    <span>পাসের হার: <b>${bn(s.rate)}%</b></span></div>`;
+}
+function resultSignsHTML(){
+  return `<div class="signs"><div>শ্রেণি শিক্ষকের স্বাক্ষর</div><div>নাযেমে তা'লীমাতের স্বাক্ষর</div><div>মুহতামিমের স্বাক্ষর</div></div>`;
+}
+/* শ্রেণিভিত্তিক ফলাফল শীট / মেধা তালিকা */
+function printTabulation(isMerit){
+  const examName = miscState.tabExamName;
+  if(!examName){ alert("প্রথমে একটি পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const res = computeClassResults(examName, miscState.tabClassFilter || "all");
+  if(!res.groups.length){ alert("এই পরীক্ষা ও শ্রেণির জন্য কোনো ফলাফল পাওয়া যায়নি।"); return; }
+  const body = res.groups.map(g => {
+    let table;
+    if(isMerit){
+      const passed = g.rows.filter(r => r.passed);
+      table = `<table><thead><tr><th>মেধাক্রম</th><th>আইডি</th><th>ছাত্রের নাম</th><th>মোট নম্বর</th><th>শতকরা</th><th>বিভাগ</th></tr></thead><tbody>${
+        passed.length ? passed.map(r => `<tr><td><b>${bnOrdinal(r.position)}</b></td><td>${esc(r.student.sid||"-")}</td><td class="l">${esc(r.student.name)}</td><td>${bn(r.total)}/${bn(r.fullTotal)}</td><td>${bn(Math.round(r.pct*100)/100)}%</td><td>${esc(DIVISION_LABELS[r.divKey])}</td></tr>`).join("")
+        : `<tr><td colspan="6">কোনো ছাত্র উত্তীর্ণ হয়নি</td></tr>`}</tbody></table>`;
+    } else {
+      table = `<table><thead><tr><th>মেধাক্রম</th><th>আইডি</th><th>ছাত্রের নাম</th>${g.subjects.map(sub => { const fm = (g.rows.map(r => r.items.find(i => i.sub === sub)).find(i => i && !i.missing) || {}).full; return `<th class="vt"><span>${esc(sub)}</span>${fm ? `<div class="fm">(${bn(fm)})</div>` : ""}</th>`; }).join("")}<th>মোট</th><th>শতকরা</th><th>বিভাগ</th><th>ফলাফল</th></tr></thead><tbody>${
+        g.rows.map(r => `<tr><td>${r.position ? bnOrdinal(r.position) : "—"}</td><td>${esc(r.student.sid||"-")}</td><td class="l">${esc(r.student.name)}</td>${
+          r.items.map(i => i.missing ? `<td>-</td>` : i.absent ? `<td class="red">অনু.</td>` : `<td class="${i.failSub?"red":""}">${bn(i.got)}</td>`).join("")
+        }<td><b>${bn(r.total)}/${bn(r.fullTotal)}</b></td><td>${bn(Math.round(r.pct*100)/100)}%</td><td>${esc(divisionShort(r))}</td><td class="${r.passed?"":"red"}">${statusLabel(r)}</td></tr>`).join("")}</tbody></table>`;
+    }
+    const title = (isMerit ? "মেধা তালিকা" : "ফলাফল শীট") + " — " + examName + " — " + g.className;
+    return `<section class="sect">${fancyHeaderHTML({ title, compact: true })}${summaryLineHTML(g.summary)}${table}
+      <div style="margin-top:6px;font-size:11.5px;color:#555;">প্রতি বিষয়ে পাস নম্বর: ${bn(res.cfg.passMark)}% | মুমতাজ ${bn(res.cfg.mumtaz)}%+ | জায়্যিদ জিদ্দান ${bn(res.cfg.jiddan)}%+ | জায়্যিদ ${bn(res.cfg.jayyid)}%+ | মাকবুল ${bn(res.cfg.maqbul)}%+ | লাল নম্বর = পাস নম্বরের নিচে/অনুপস্থিত</div>
+      ${resultSignsHTML()}</section>`;
+  }).join("");
+  openResultDoc(resultDocShell(isMerit ? "মেধা তালিকা" : "ফলাফল শীট", body, isMerit ? "portrait" : "landscape"));
+}
+/* প্রত্যেক ছাত্রের মার্কশীট */
+function printMarksheets(examName, classFilter, onlyId){
+  if(!examName){ alert("প্রথমে একটি পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const res = computeClassResults(examName, classFilter || "all");
+  let rows = [];
+  res.groups.forEach(g => g.rows.forEach(r => rows.push(r)));
+  if(onlyId) rows = rows.filter(r => r.student.id === onlyId);
+  const skipped = rows.filter(r => r.incomplete).length;
+  rows = rows.filter(r => !r.incomplete);
+  if(!rows.length){ alert(onlyId ? "এই ছাত্রের নম্বর এন্ট্রি অসম্পূর্ণ বা নেই।" : "প্রিন্টের মতো সম্পূর্ণ ফলাফল পাওয়া যায়নি।"); return; }
+  const cfg = res.cfg;
+  const logo = getBrandLogo();
+  const pubFor = cn => { const p = (db.resultPublish || []).find(x => x.examName === examName && (x.className === "all" || x.className === cn)); return p ? fmtDate(p.date) : ""; };
+  const pages = rows.map(r => {
+    const s = r.student;
+    const trs = r.items.map((i, idx) => `<tr><td>${bn(idx+1)}</td><td class="l">${esc(i.sub)}</td><td>${bn(i.full)}</td><td>${bn(i.need)}</td>
+      <td class="${i.failSub?"red":""}"><b>${i.absent ? "অনুপস্থিত" : bn(i.got)}</b></td><td class="${i.failSub?"red":""}">${i.failSub ? "অনুত্তীর্ণ" : "উত্তীর্ণ"}</td></tr>`).join("");
+    const words = Number.isInteger(r.total) ? bnIntWords(r.total) + " মাত্র" : "";
+    const pdate = pubFor(s.className);
+    return `<section class="ms"><div class="wm"><img src="${logo}" alt=""></div><div class="in">
+      ${fancyHeaderHTML({ title: "ফলাফল পত্র (মার্কশীট) — " + examName })}
+      <div class="info">
+        <div class="ph">${s.photo ? `<img src="${s.photo}">` : "ছবি"}</div>
+        <div class="g">
+          <div><span>ছাত্রের নাম:</span><b>${esc(s.name)}</b></div>
+          <div><span>পিতার নাম:</span><b>${esc(s.fatherName||"")}</b></div>
+          <div><span>শ্রেণি/জামাত:</span><b>${esc(s.className)}</b></div>
+          <div><span>আইডি নং:</span><b>${esc(s.sid||"")}</b></div>
+          <div><span>ভর্তি নং:</span><b>${s.admissionNo ? esc(bn(s.admissionNo)) : ""}</b></div>
+          <div><span>সিট নং:</span><b>${s.seatNo ? esc(bn(s.seatNo)) : ""}</b></div>
+        </div>
+      </div>
+      <table><thead><tr><th style="width:8%">ক্রম</th><th>বিষয়</th><th style="width:14%">পূর্ণমান</th><th style="width:14%">পাস নম্বর</th><th style="width:16%">প্রাপ্ত নম্বর</th><th style="width:15%">ফলাফল</th></tr></thead>
+        <tbody>${trs}<tr><td colspan="2"><b>সর্বমোট</b></td><td><b>${bn(r.fullTotal)}</b></td><td></td><td><b>${bn(r.total)}</b></td><td></td></tr></tbody></table>
+      ${words ? `<div class="words">মোট প্রাপ্ত নম্বর (কথায়): <b>${esc(words)}</b></div>` : ""}
+      <div class="boxes">
+        <div><span>শতকরা নম্বর</span><b>${bn(Math.round(r.pct*100)/100)}%</b></div>
+        <div><span>বিভাগ</span><b class="${r.passed?"":"red"}">${esc(divisionShort(r))}</b></div>
+        <div><span>মেধাক্রম</span><b>${r.position ? bnOrdinal(r.position) : "—"}</b></div>
+        <div><span>ফলাফল</span><b class="${r.passed?"":"red"}">${statusLabel(r)}</b></div>
+      </div>
+      <div class="scale">নম্বর বিভাজন: মুমতাজ (স্টার মার্ক) ${bn(cfg.mumtaz)}% ও তদূর্ধ্ব • জায়্যিদ জিদ্দান (১ম) ${bn(cfg.jiddan)}% • জায়্যিদ (২য়) ${bn(cfg.jayyid)}% • মাকবুল (৩য়) ${bn(cfg.maqbul)}% • প্রতি বিষয়ে ন্যূনতম পাস নম্বর ${bn(cfg.passMark)}%। কোনো বিষয়ে অকৃতকার্য হলে সামগ্রিক ফলাফল রাসিব (অকৃতকার্য) গণ্য হবে।</div>
+      <div class="pub">ফলাফল প্রকাশের তারিখ: ${pdate ? "<b>"+pdate+"</b>" : "...................."}</div>
+      ${resultSignsHTML()}
+    </div></section>`;
+  }).join("");
+  const css = `
+    .ms{position:relative;page-break-after:always;height:277mm;border:3px solid #14432A;border-radius:6px;padding:7mm 9mm;overflow:hidden;}
+    .ms:last-child{page-break-after:auto;}
+    .ms::before{content:"";position:absolute;inset:4px;border:1.5px solid #C9A227;border-radius:3px;pointer-events:none;}
+    .ms .in{position:relative;z-index:1;} .ms .wm{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:0;}
+    .ms .wm img{width:360px;height:360px;object-fit:contain;opacity:.08;}
+    .info{display:flex;gap:12px;margin:6px 0 10px;align-items:stretch;}
+    .info .ph{width:26mm;height:32mm;border:1.5px solid #333;display:flex;align-items:center;justify-content:center;font-size:11px;color:#777;overflow:hidden;flex-shrink:0;}
+    .info .ph img{width:100%;height:100%;object-fit:cover;}
+    .info .g{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;align-content:center;}
+    .info .g div{display:flex;gap:6px;border-bottom:1px dotted #333;padding-bottom:2px;font-size:13.5px;} .info .g span{color:#5B6357;white-space:nowrap;}
+    .words{margin-top:8px;font-size:13.5px;}
+    .boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;}
+    .boxes div{border:1.5px solid #14432A;border-radius:8px;text-align:center;padding:5px 3px;background:#FBF3D5;} .boxes span{display:block;font-size:11.5px;color:#5B6357;} .boxes b{font-size:15px;}
+    .scale{margin-top:10px;font-size:11.5px;line-height:1.7;color:#444;border-top:1px dashed #999;padding-top:6px;}
+    .pub{margin-top:8px;font-size:13px;}
+    .ms .signs{margin-top:46px;}`;
+  openResultDoc(resultDocShell("মার্কশীট", pages, "portrait", css));
+  if(skipped) setTimeout(() => alert(bn(skipped) + " জনের নম্বর এন্ট্রি অসম্পূর্ণ থাকায় মার্কশীট বাদ গেছে।"), 600);
+}
+/* ফলাফল ঘোষণা (গেজেট) */
+function printResultGazette(examName){
+  if(!examName){ alert("প্রথমে একটি পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const res = computeClassResults(examName, "all");
+  if(!res.groups.length){ alert("এই পরীক্ষার কোনো ফলাফল পাওয়া যায়নি।"); return; }
+  const all = res.groups.reduce((acc, g) => { Object.keys(g.summary).forEach(k => { if(k !== "rate") acc[k] = (acc[k]||0) + g.summary[k]; }); return acc; }, {});
+  const counted = (all.passed||0) + (all.failed||0); all.rate = counted ? Math.round(all.passed / counted * 1000) / 10 : 0;
+  const rowHTML = (name, s, bold) => `<tr style="${bold?"font-weight:800;background:#FBF3D5;":""}"><td class="l">${esc(name)}</td><td>${bn(s.total)}</td><td>${bn(s.passed)}</td><td>${bn(s.failed)}</td><td>${bn(s.mumtaz)}</td><td>${bn(s.jiddan)}</td><td>${bn(s.jayyid)}</td><td>${bn(s.maqbul)}</td><td>${bn(s.rate)}%</td></tr>`;
+  const top = res.groups.map(g => {
+    const t = g.rows.filter(r => r.passed && r.position <= 3);
+    return t.length ? `<tr><td class="l"><b>${esc(g.className)}</b></td><td class="l">${t.map(r => `${bnOrdinal(r.position)}: ${esc(r.student.name)} (${bn(Math.round(r.pct*100)/100)}%)`).join(" &nbsp;|&nbsp; ")}</td></tr>` : "";
+  }).join("");
+  const body = `<section class="sect">${fancyHeaderHTML({ title: "ফলাফল ঘোষণা — " + examName })}
+    <p style="font-size:14px;line-height:1.9;text-align:justify;">এতদ্বারা মাদরাসার সকল ছাত্র ও অভিভাবকদের অবগতির জন্য জানানো যাচ্ছে যে, <b>${esc(examName)}</b>-এর ফলাফল প্রকাশিত হইয়াছে। মোট পরীক্ষার্থী <b>${bn(all.total)}</b> জন, উত্তীর্ণ <b>${bn(all.passed)}</b> জন, অনুত্তীর্ণ <b>${bn(all.failed)}</b> জন এবং পাসের হার <b>${bn(all.rate)}%</b>। প্রত্যেক ছাত্র নিজ নিজ মার্কশীট মাদরাসা অফিস হইতে সংগ্রহ করিবে।</p>
+    <table><thead><tr><th>শ্রেণি/জামাত</th><th>পরীক্ষার্থী</th><th>উত্তীর্ণ</th><th>অনুত্তীর্ণ</th><th>মুমতাজ</th><th>জায়্যিদ জিদ্দান</th><th>জায়্যিদ</th><th>মাকবুল</th><th>পাসের হার</th></tr></thead>
+    <tbody>${res.groups.map(g => rowHTML(g.className, g.summary)).join("")}${rowHTML("সর্বমোট", all, true)}</tbody></table>
+    ${top ? `<h3 style="margin:16px 0 6px;font-size:15px;color:#14432A;">মেধা তালিকা — শ্রেণিভিত্তিক শীর্ষ ৩ জন</h3><table><tbody>${top}</tbody></table>` : ""}
+    <div style="margin-top:8px;font-size:11.5px;color:#555;">মুমতাজ ${bn(res.cfg.mumtaz)}%+ • জায়্যিদ জিদ্দান ${bn(res.cfg.jiddan)}%+ • জায়্যিদ ${bn(res.cfg.jayyid)}%+ • মাকবুল ${bn(res.cfg.maqbul)}%+ • প্রতি বিষয়ে পাস নম্বর ${bn(res.cfg.passMark)}%</div>
+    <div class="signs"><div>পরীক্ষা নিয়ন্ত্রকের স্বাক্ষর</div><div>নাযেমে তা'লীমাতের স্বাক্ষর</div><div>মুহতামিমের স্বাক্ষর</div></div></section>`;
+  openResultDoc(resultDocShell("ফলাফল ঘোষণা", body, "portrait"));
+}
+function resultPreviewHTML(){
+  const examName = miscState.tabExamName;
+  if(!examName) return `<div class="empty">একটি পরীক্ষা নির্বাচন করুন।</div>`;
+  const res = computeClassResults(examName, miscState.tabClassFilter || "all");
+  if(!res.groups.length) return `<div class="empty">এই পরীক্ষা ও শ্রেণির জন্য কোনো ফলাফল পাওয়া যায়নি।</div>`;
+  const pub = (db.resultPublish || []).filter(p => p.examName === examName);
+  const sumRows = res.groups.map(g => { const s = g.summary; return `<tr><td>${esc(g.className)}</td><td>${bn(s.total)}</td><td>${bn(s.passed)}</td><td>${bn(s.failed)}</td><td>${s.incomplete?bn(s.incomplete):"-"}</td><td>${bn(s.mumtaz)}</td><td>${bn(s.jiddan)}</td><td>${bn(s.jayyid)}</td><td>${bn(s.maqbul)}</td><td>${bn(s.rate)}%</td><td>${isResultPublished(examName, g.className) ? "✅ প্রকাশিত" : "⏳ অপ্রকাশিত"}</td></tr>`; }).join("");
+  const warn = res.groups.some(g => g.summary.incomplete) ? `<p style="color:#B3261E;font-size:12.5px;margin:6px 0;">⚠️ কিছু ছাত্রের সব বিষয়ের নম্বর এন্ট্রি হয়নি ("নম্বর বাকি")। তাদের মার্কশীট ও মেধাক্রম বাদ থাকবে।</p>` : "";
+  const list = res.groups.map(g => `<div style="font-weight:700;margin:10px 0 4px;">${esc(g.className)}</div><table><thead><tr><th>মেধাক্রম</th><th>নাম</th><th>মোট</th><th>%</th><th>বিভাগ</th><th>ফলাফল</th></tr></thead><tbody>${
+    g.rows.map(r => `<tr><td>${r.position ? bnOrdinal(r.position) : "—"}</td><td>${esc(r.student.name)}</td><td>${bn(r.total)}/${bn(r.fullTotal)}</td><td>${bn(Math.round(r.pct*100)/100)}</td><td>${esc(divisionShort(r))}</td><td style="color:${r.passed?"var(--paid)":"var(--due)"};font-weight:700;">${statusLabel(r)}</td></tr>`).join("")}</tbody></table>`).join("");
+  return `<table><thead><tr><th>শ্রেণি</th><th>পরীক্ষার্থী</th><th>উত্তীর্ণ</th><th>অনুত্তীর্ণ</th><th>বাকি</th><th>মুমতাজ</th><th>জিদ্দান</th><th>জায়্যিদ</th><th>মাকবুল</th><th>পাস%</th><th>অবস্থা</th></tr></thead><tbody>${sumRows}</tbody></table>${warn}${list}`;
+}
 function renderResultsTab(){
   const studentOptions = db.students.map(s=>`<option value="${s.id}">${s.sid?esc(s.sid)+" — ":""}${esc(s.name)} — ${esc(s.className)}</option>`).join("");
   const examNames = allExamNames();
+  const cfg = resultCfg();
+  const exam = miscState.tabExamName || "";
+  const cls = miscState.tabClassFilter || "all";
+  const published = exam && isResultPublished(exam, cls === "all" ? "__none__" : cls) || (exam && (db.resultPublish||[]).some(p => p.examName === exam && p.className === cls));
+  const num = (name, label, v) => `<label class="field"><span>${label}</span><input name="${name}" type="number" min="0" max="100" step="any" value="${v}"></label>`;
   return `
-    <div class="sec-head"><div class="badge">🎓</div><div><h2>পরীক্ষার ফলাফল</h2><p>বিষয়ভিত্তিক নম্বর ও গ্রেড এন্ট্রি</p></div></div>
-    <div class="arch form-card">
+    <div class="sec-head"><div class="badge">🎓</div><div><h2>পরীক্ষার ফলাফল</h2><p>কওমী মাদরাসার নিয়মে নম্বর এন্ট্রি, বিভাগ নির্ধারণ ও ফলাফল প্রকাশ</p></div></div>
+
+    <div class="arch form-card" id="gridBox">
+      <strong>📋 এক শ্রেণির সব ছাত্রের সব বিষয়ের নম্বর একসাথে এন্ট্রি</strong>
       ${db.students.length===0 ? `<div class="empty">প্রথমে 'ছাত্র ভর্তি' অংশে ছাত্র যোগ করুন।</div>` : `
-      <form class="grid" data-form="results">
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        <label class="field"><span>পরীক্ষার নাম</span><select name="exam" data-addable="exam">${examNameOptionsHTML(exam)}</select></label>
+        <label class="field"><span>শ্রেণি</span><select name="cls" data-addable="class">${classOptionsHTML(cls==="all"?"":cls)}</select></label>
+      </div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="grid-subjects">📚 বিষয় বাছাই করুন</button></div>`}
+    </div>
+    <div id="gridPanel"></div>
+
+    <div class="arch form-card" id="bulkBox" style="margin-top:8px;">
+      <strong>📝 একটি বিষয়ের নম্বর (শ্রেণি অনুযায়ী)</strong>
+      ${db.students.length===0 ? `<div class="empty">প্রথমে 'ছাত্র ভর্তি' অংশে ছাত্র যোগ করুন।</div>` : `
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        <label class="field"><span>পরীক্ষার নাম</span><select name="exam" data-addable="exam">${examNameOptionsHTML(exam)}</select></label>
+        <label class="field"><span>শ্রেণি</span><select name="cls" data-addable="class">${classOptionsHTML(cls==="all"?"":cls)}</select></label>
+        <label class="field"><span>বিষয়/বই (শ্রেণি অনুযায়ী তালিকা)</span><select name="subject" data-addable="subject">${subjectOptionsHTML("", cls==="all" ? allClassNames()[0] : cls)}</select></label>
+        <label class="field"><span>পূর্ণমান</span><input name="full" type="number" min="1" value="100"></label>
+      </div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="bulk-load">👥 ছাত্র তালিকা দেখান</button></div>`}
+    </div>
+    <div id="bulkList"></div>
+
+    <details class="arch form-card" style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">➕ একজন ছাত্রের একটি বিষয়ের নম্বর যোগ করুন</summary>
+      ${db.students.length===0 ? `<div class="empty">প্রথমে ছাত্র যোগ করুন।</div>` : `
+      <form class="grid" data-form="results" style="margin-top:10px;">
         <label class="field" style="grid-column:span 2;"><span>ছাত্র</span><select name="studentId" required><option value="">নির্বাচন করুন</option>${studentOptions}</select></label>
         <label class="field"><span>পরীক্ষার নাম</span><input name="examName"></label>
         <label class="field"><span>বিষয়</span><input name="subject" required></label>
@@ -2246,8 +2455,9 @@ function renderResultsTab(){
         <label class="field"><span>প্রাপ্ত নম্বর</span><input type="number" name="obtained" required></label>
         <div class="btn-end"><button class="btn" type="submit">➕ যোগ করুন</button></div>
       </form>`}
-    </div>
-    <div class="arch">
+    </details>
+
+    <div class="arch" style="margin-top:8px;">
       <div class="tbl-toolbar">
         <button class="btn ghost small" data-print="results">🖨 প্রিন্ট করুন</button>
         <div class="search-box"><input placeholder="ছাত্রের নাম/আইডি/পরীক্ষা দিয়ে খুঁজুন..." data-search="results" value="${esc(searchState.results||'')}"><span class="ic">🔍</span></div>
@@ -2255,26 +2465,46 @@ function renderResultsTab(){
       <div class="tbl-body" id="tbl-results">${resultsTableHTML()}</div>
     </div>
 
-    <div class="sec-head" style="margin-top:8px;"><div class="badge">📜</div><div><h2>নম্বরপত্র ও মেধা তালিকা</h2><p>সকল বিষয়ের নম্বর একত্রে দেখুন, নম্বরপত্র বা মেধাক্রম অনুযায়ী তালিকা প্রিন্ট করুন</p></div></div>
+    <details class="arch form-card" style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">⚙️ ফলাফলের নিয়ম (নম্বর বিভাজন ও পাস নম্বর)</summary>
+      <p style="font-size:12px;color:#5B6357;margin:8px 0;">শতকরা নম্বর অনুযায়ী বিভাগ ঠিক হয়। আপনার বোর্ড বা মাদরাসার বিজ্ঞপ্তির সাথে মিলিয়ে নিন। কোনো বিষয়ে পাস নম্বরের নিচে বা অনুপস্থিত হলে সামগ্রিক ফলাফল রাসিব (অকৃতকার্য) হবে।</p>
+      <form class="grid" data-form="resultConfig" style="grid-template-columns:repeat(2,1fr);">
+        ${num("mumtaz","মুমতাজ (স্টার মার্ক) — শতকরা ন্যূনতম",cfg.mumtaz)}
+        ${num("jiddan","জায়্যিদ জিদ্দান (১ম বিভাগ) — ন্যূনতম",cfg.jiddan)}
+        ${num("jayyid","জায়্যিদ (২য় বিভাগ) — ন্যূনতম",cfg.jayyid)}
+        ${num("maqbul","মাকবুল (৩য় বিভাগ) — ন্যূনতম",cfg.maqbul)}
+        ${num("passMark","প্রতি বিষয়ে পাস নম্বর (%)",cfg.passMark)}
+        <div class="btn-end"><button class="btn" type="submit">💾 সংরক্ষণ</button></div>
+      </form>
+    </details>
+
+    <div class="sec-head" style="margin-top:8px;"><div class="badge">📜</div><div><h2>ফলাফল প্রকাশ ও প্রিন্ট</h2><p>মেধাক্রমসহ ফলাফল শীট, মার্কশীট, মেধা তালিকা ও ঘোষণা</p></div></div>
     <div class="arch form-card">
       ${examNames.length===0 ? `<div class="empty">প্রথমে উপরে ফলাফল এন্ট্রি করুন।</div>` : `
-      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
         <label class="field"><span>পরীক্ষার নাম</span>
-          <select data-misc-field="tabExamName">
-            <option value="">নির্বাচন করুন</option>
-            ${examNames.map(n=>`<option ${n===miscState.tabExamName?'selected':''}>${esc(n)}</option>`).join("")}
-          </select>
-        </label>
+          <select data-misc-field="tabExamName"><option value="">নির্বাচন করুন</option>${examNames.map(n=>`<option ${n===exam?'selected':''}>${esc(n)}</option>`).join("")}</select></label>
         <label class="field"><span>শ্রেণি</span>
-          <select data-misc-field="tabClassFilter">
-            <option value="all" ${miscState.tabClassFilter==='all'?'selected':''}>সকল শ্রেণি</option>
-            ${CLASSES.map(c=>`<option ${c===miscState.tabClassFilter?'selected':''}>${c}</option>`).join("")}
-          </select>
-        </label>
-        <button class="btn ghost" type="button" data-action="print-tabulation">🖨 নম্বরপত্র প্রিন্ট করুন</button>
-        <button class="btn" type="button" data-action="print-merit">🏆 মেধা তালিকা প্রিন্ট করুন</button>
+          <select data-misc-field="tabClassFilter"><option value="all" ${cls==='all'?'selected':''}>সকল শ্রেণি</option>${allClassNames().map(c=>`<option ${c===cls?'selected':''}>${esc(c)}</option>`).join("")}</select></label>
       </div>
-      <div style="overflow-x:auto;">${tabulationTableHTML()}</div>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost" type="button" data-action="print-tabulation">📊 ফলাফল শীট</button>
+        <button class="btn ghost" type="button" data-action="print-merit">🏆 মেধা তালিকা</button>
+        <button class="btn" type="button" data-action="print-marksheets">🪪 সকল ছাত্রের মার্কশীট</button>
+        <button class="btn ghost" type="button" data-action="print-gazette">📢 ফলাফল ঘোষণা</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;">
+        <label class="field" style="flex:1;min-width:180px;"><span>একজনের মার্কশীট</span><select id="oneMarksheetStudent"><option value="">ছাত্র নির্বাচন করুন</option>${studentOptions}</select></label>
+        <button class="btn ghost small" type="button" data-action="print-one-marksheet">🖨 মার্কশীট</button>
+      </div>
+      <div style="margin-top:14px;padding:10px;border:1.5px solid #14432A;border-radius:10px;background:#F4FAEF;">
+        <div style="font-weight:700;margin-bottom:6px;">${published ? "✅ এই পরীক্ষা ও শ্রেণির ফলাফল প্রকাশিত" : "⏳ এই ফলাফল এখনো অপ্রকাশিত"}</div>
+        <div style="font-size:12.5px;color:#5B6357;margin-bottom:8px;">প্রকাশ করলে অভিভাবকরা নিজেদের পোর্টালে এই ফলাফল দেখতে পাবেন। প্রকাশের আগে অভিভাবকরা কিছু দেখবেন না।</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" type="button" data-action="publish-result">📣 ফলাফল প্রকাশ করুন</button>
+          <button class="btn ghost" type="button" data-action="unpublish-result">↩️ প্রকাশ বাতিল</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;margin-top:14px;">${resultPreviewHTML()}</div>`}
     </div>`;
 }
 
@@ -3365,6 +3595,7 @@ async function syncToCloud(){
 
     db.results.forEach(r=>{
       const st = db.students.find(x=>x.id===r.studentId); if(!st || !st.sid) return;
+      if(!isResultPublished(r.examName, st.className)) return;
       addOp(db2.collection("results").doc(r.id), {
         sid: st.sid, examName: r.examName||"", subject: r.subject||"",
         obtained: Number(r.obtained)||0, fullMarks: Number(r.fullMarks)||100
@@ -3540,6 +3771,12 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     db.examRoutine.unshift({ id:uid(), examName, className, subject, date, time });
     miscState.examGridName = examName;
     saveDB(); renderContent(); return;
+  }
+  if(type==="resultConfig"){
+    const g = k => { const n = Number(fd.get(k)); return isFinite(n) ? Math.min(100, Math.max(0, n)) : undefined; };
+    const next = { mumtaz:g("mumtaz"), jiddan:g("jiddan"), jayyid:g("jayyid"), maqbul:g("maqbul"), passMark:g("passMark") };
+    if(!(next.mumtaz >= next.jiddan && next.jiddan >= next.jayyid && next.jayyid >= next.maqbul)){ alert("নম্বর বিভাজন ক্রমানুসারে হতে হবে: মুমতাজ ≥ জায়্যিদ জিদ্দান ≥ জায়্যিদ ≥ মাকবুল।"); return; }
+    db.resultConfig = next; saveDB(); renderContent(); alert("ফলাফলের নিয়ম সংরক্ষণ করা হয়েছে।"); return;
   }
   if(type==="bookLink"){
     const url = (fd.get("url")||"").trim();
@@ -5403,6 +5640,168 @@ document.addEventListener("click", function(e){
   if(rm){ const row = rm.closest(".fee-row"); if(row) row.remove(); return; }
   const np = e.target.closest("[data-notice-print]");
   if(np){ const n = (db.notices||[]).find(x => x.id === np.dataset.noticePrint); if(n) printNotice(n); return; }
+  if(e.target.closest('[data-action="print-marksheets"]')){ printMarksheets(miscState.tabExamName, miscState.tabClassFilter || "all"); return; }
+  if(e.target.closest('[data-action="print-gazette"]')){ printResultGazette(miscState.tabExamName); return; }
+  if(e.target.closest('[data-action="print-one-marksheet"]')){
+    const sel = document.getElementById("oneMarksheetStudent");
+    if(!sel || !sel.value){ alert("ছাত্র নির্বাচন করুন।"); return; }
+    printMarksheets(miscState.tabExamName, "all", sel.value); return;
+  }
+  if(e.target.closest('[data-action="publish-result"]')){
+    const ex = miscState.tabExamName, cl = miscState.tabClassFilter || "all";
+    if(!ex){ alert("প্রথমে পরীক্ষার নাম নির্বাচন করুন।"); return; }
+    const res = computeClassResults(ex, cl);
+    if(!res.groups.length){ alert("এই পরীক্ষার কোনো ফলাফল নেই।"); return; }
+    const inc = res.groups.reduce((a,g) => a + g.summary.incomplete, 0);
+    if(!confirm((inc ? "⚠️ " + bn(inc) + " জনের নম্বর এন্ট্রি অসম্পূর্ণ আছে।\n\n" : "") + "\"" + ex + "\" — " + (cl === "all" ? "সকল শ্রেণির" : cl + " শ্রেণির") + " ফলাফল প্রকাশ করবেন? অভিভাবকরা পোর্টালে দেখতে পাবেন।")) return;
+    db.resultPublish = (db.resultPublish || []).filter(p => !(p.examName === ex && p.className === cl));
+    db.resultPublish.push({ examName: ex, className: cl, date: todayISO() });
+    logActivity("ফলাফল প্রকাশ", ex + " — " + (cl === "all" ? "সকল শ্রেণি" : cl));
+    saveDB(); renderContent(); return;
+  }
+  if(e.target.closest('[data-action="unpublish-result"]')){
+    const ex = miscState.tabExamName, cl = miscState.tabClassFilter || "all";
+    if(!ex) return;
+    if(!confirm("এই ফলাফলের প্রকাশ বাতিল করবেন?")) return;
+    db.resultPublish = (db.resultPublish || []).filter(p => !(p.examName === ex && p.className === cl));
+    saveDB(); renderContent(); return;
+  }
+  if(e.target.closest('[data-action="grid-subjects"]')){
+    const v = boxValues("gridBox");
+    if(!v.exam || v.exam === "__new__"){ alert("পরীক্ষার নাম নির্বাচন করুন।"); return; }
+    if(!v.cls || v.cls === "__new__"){ alert("শ্রেণি নির্বাচন করুন।"); return; }
+    const students = seatOrderedStudents(v.cls);
+    const panel = document.getElementById("gridPanel");
+    if(!students.length){ panel.innerHTML = `<div class="empty">এই শ্রেণিতে কোনো ছাত্র নেই।</div>`; return; }
+    const sMap = studentMap();
+    const existing = [];
+    db.results.slice().reverse().forEach(r => { if(r.examName === v.exam && sMap[r.studentId] && sMap[r.studentId].className === v.cls && !existing.includes(r.subject)) existing.push(r.subject); });
+    const subjects = [...new Set([...existing, ...booksForClass(v.cls)])];
+    const fullOf = sub => { const r = db.results.find(x => x.examName === v.exam && x.subject === sub && sMap[x.studentId] && sMap[x.studentId].className === v.cls); return r ? (Number(r.fullMarks) || 100) : 100; };
+    panel.dataset.exam = v.exam; panel.dataset.cls = v.cls;
+    panel.innerHTML = `<div class="arch form-card" style="margin-top:8px;">
+      <div style="font-weight:700;">${esc(v.exam)} — ${esc(v.cls)} (${bn(students.length)} জন ছাত্র)</div>
+      <div style="font-size:12.5px;color:#5B6357;margin:4px 0 8px;">যে যে বিষয়ে পরীক্ষা হয়েছে সেগুলোতে টিক দিন এবং পূর্ণমান ঠিক করুন।</div>
+      <div id="gridSubs">${subjects.map(sub => `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px dashed #D7DDCB;">
+        <input type="checkbox" data-g-sub="${esc(sub)}" ${existing.includes(sub) ? "checked" : ""}>
+        <span style="flex:1;">${esc(sub)}</span>
+        <input type="number" min="1" data-g-full value="${fullOf(sub)}" style="width:64px;padding:4px;border:1px solid #C9CFC0;border-radius:6px;text-align:center;"> <small>পূর্ণমান</small></label>`).join("")}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;"><input id="gNewSub" placeholder="তালিকায় নেই এমন বিষয়ের নাম" style="flex:1;padding:8px;border:1px solid #C9CFC0;border-radius:8px;">
+        <button class="btn ghost small" type="button" data-action="grid-add-subject">➕ যোগ</button></div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="grid-build">📋 নম্বরের ছক তৈরি করুন</button></div>
+    </div><div id="gridTable"></div>`;
+    return;
+  }
+  if(e.target.closest('[data-action="grid-add-subject"]')){
+    const inp = document.getElementById("gNewSub");
+    const name = (inp.value || "").trim();
+    if(!name) return;
+    const box = document.getElementById("gridSubs");
+    if([...box.querySelectorAll("[data-g-sub]")].some(c => c.dataset.gSub === name)){ inp.value = ""; return; }
+    box.insertAdjacentHTML("beforeend", `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px dashed #D7DDCB;">
+      <input type="checkbox" data-g-sub="${esc(name)}" checked><span style="flex:1;">${esc(name)}</span>
+      <input type="number" min="1" data-g-full value="100" style="width:64px;padding:4px;border:1px solid #C9CFC0;border-radius:6px;text-align:center;"> <small>পূর্ণমান</small></label>`);
+    db.subjectList = db.subjectList || [];
+    if(!db.subjectList.includes(name) && !DEFAULT_SUBJECTS.includes(name)){ db.subjectList.push(name); saveDB(); }
+    inp.value = "";
+    return;
+  }
+  if(e.target.closest('[data-action="grid-build"]')){
+    const panel = document.getElementById("gridPanel");
+    const exam = panel.dataset.exam, cls = panel.dataset.cls;
+    const subs = [], fulls = [];
+    panel.querySelectorAll("#gridSubs label").forEach(l => {
+      const c = l.querySelector("[data-g-sub]");
+      if(c && c.checked){ subs.push(c.dataset.gSub); fulls.push(Number(l.querySelector("[data-g-full]").value) || 100); }
+    });
+    if(!subs.length){ alert("কমপক্ষে একটি বিষয়ে টিক দিন।"); return; }
+    const students = seatOrderedStudents(cls);
+    const tbl = document.getElementById("gridTable");
+    tbl.dataset.exam = exam; tbl.dataset.cls = cls; tbl.dataset.subs = JSON.stringify(subs); tbl.dataset.fulls = JSON.stringify(fulls);
+    const cell = (st, i) => {
+      const ex = db.results.find(r => r.studentId === st.id && r.examName === exam && r.subject === subs[i]);
+      return `<td style="padding:4px;"><input type="number" inputmode="decimal" min="0" max="${fulls[i]}" step="any" data-g-st="${st.id}" data-g-col="${i}" value="${ex && !ex.absent ? esc(ex.obtained) : ""}" style="width:62px;padding:6px 2px;border:1px solid #C9CFC0;border-radius:6px;text-align:center;">
+        <label style="display:block;font-size:10px;color:#B3261E;margin-top:2px;"><input type="checkbox" data-g-abs="${st.id}|${i}" ${ex && ex.absent ? "checked" : ""}> অনু.</label></td>`;
+    };
+    tbl.innerHTML = `<div class="arch form-card" style="margin-top:8px;">
+      <div style="font-size:12.5px;color:#5B6357;margin-bottom:6px;">প্রতি ছাত্রের নিচে "অনু." টিক দিলে সেই বিষয়ে অনুপস্থিত গণ্য হবে। ঘর ফাঁকা রাখলে নম্বর বাকি থাকবে।</div>
+      <div style="overflow-x:auto;"><table style="min-width:${180 + subs.length * 84}px;"><thead><tr><th style="position:sticky;left:0;background:#EEF2E8;min-width:130px;">ছাত্রের নাম</th>${subs.map((sub, i) => `<th>${esc(sub)}<br><small>(${bn(fulls[i])})</small></th>`).join("")}</tr></thead>
+      <tbody>${students.map(st => `<tr><td style="position:sticky;left:0;background:#fff;text-align:left;font-weight:600;">${esc(st.sid ? st.sid + ". " : "")}${esc(st.name)}</td>${subs.map((_, i) => cell(st, i)).join("")}</tr>`).join("")}</tbody></table></div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="grid-save">💾 সব ছাত্রের নম্বর সংরক্ষণ করুন</button></div></div>`;
+    tbl.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if(e.target.closest('[data-action="grid-save"]')){
+    const tbl = document.getElementById("gridTable");
+    const exam = tbl.dataset.exam, cls = tbl.dataset.cls;
+    const subs = JSON.parse(tbl.dataset.subs || "[]"), fulls = JSON.parse(tbl.dataset.fulls || "[]");
+    let saved = 0, removed = 0, bad = 0;
+    tbl.querySelectorAll("[data-g-st]").forEach(inp => {
+      const id = inp.dataset.gSt, i = Number(inp.dataset.gCol);
+      const abs = tbl.querySelector('[data-g-abs="' + id + "|" + i + '"]').checked;
+      const raw = inp.value.trim();
+      const sub = subs[i], full = fulls[i] || 100;
+      let rec = db.results.find(r => r.studentId === id && r.examName === exam && r.subject === sub);
+      inp.style.borderColor = "#C9CFC0";
+      if(!abs && raw === ""){
+        if(rec){ db.results = db.results.filter(r => r !== rec); removed++; }
+        return;
+      }
+      const n = Number(raw);
+      if(!abs && (!isFinite(n) || n < 0 || n > full)){ bad++; inp.style.borderColor = "#B3261E"; return; }
+      if(!rec){ rec = { id: uid(), studentId: id, examName: exam, subject: sub }; db.results.unshift(rec); }
+      rec.fullMarks = String(full); rec.obtained = abs ? "0" : String(n); rec.absent = abs;
+      saved++;
+    });
+    if(bad){ alert(bn(bad) + "টি ঘরের নম্বর পূর্ণমানের চেয়ে বেশি বা ভুল (লাল দাগ)। সেগুলো সংরক্ষণ হয়নি, ঠিক করে আবার সংরক্ষণ করুন।"); }
+    saveDB();
+    if(!bad){ miscState.tabExamName = exam; miscState.tabClassFilter = cls; renderContent(); }
+    alert(bn(saved) + "টি নম্বর সংরক্ষণ করা হয়েছে" + (removed ? ", " + bn(removed) + "টি ফাঁকা ঘরের নম্বর মুছে ফেলা হয়েছে" : "") + "।");
+    return;
+  }
+  if(e.target.closest('[data-action="bulk-load"]')){
+    const v = boxValues("bulkBox");
+    if(!v.exam || v.exam === "__new__"){ alert("পরীক্ষার নাম নির্বাচন করুন।"); return; }
+    if(!v.cls || v.cls === "__new__"){ alert("শ্রেণি নির্বাচন করুন।"); return; }
+    if(!v.subject || v.subject === "__new__"){ alert("বিষয়/বই নির্বাচন করুন।"); return; }
+    const list = seatOrderedStudents(v.cls);
+    const holder = document.getElementById("bulkList");
+    if(!list.length){ holder.innerHTML = `<div class="empty">এই শ্রেণিতে কোনো ছাত্র নেই।</div>`; return; }
+    const full = Number(v.full) || 100;
+    holder.dataset.exam = v.exam; holder.dataset.subject = v.subject; holder.dataset.full = full;
+    holder.innerHTML = `<div class="arch form-card" style="margin-top:8px;">
+      <div style="font-weight:700;margin-bottom:6px;">${esc(v.exam)} — ${esc(v.cls)} — ${esc(v.subject)} (পূর্ণমান ${bn(full)})</div>
+      <table><thead><tr><th>আইডি</th><th>ছাত্রের নাম</th><th>প্রাপ্ত নম্বর</th><th>অনুপস্থিত</th></tr></thead><tbody>${
+        list.map(st => {
+          const ex = db.results.find(r => r.studentId === st.id && r.examName === v.exam && r.subject === v.subject);
+          return `<tr><td>${esc(st.sid||"-")}</td><td style="text-align:left;">${esc(st.name)}</td>
+            <td><input type="number" min="0" max="${full}" step="any" data-bulk-id="${st.id}" value="${ex && !ex.absent ? esc(ex.obtained) : ""}" style="width:80px;padding:6px;border:1px solid #C9CFC0;border-radius:6px;text-align:center;"></td>
+            <td style="text-align:center;"><input type="checkbox" data-bulk-abs="${st.id}" ${ex && ex.absent ? "checked" : ""}></td></tr>`;
+        }).join("")}</tbody></table>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="bulk-save">💾 সব নম্বর সংরক্ষণ করুন</button></div></div>`;
+    return;
+  }
+  if(e.target.closest('[data-action="bulk-save"]')){
+    const holder = document.getElementById("bulkList");
+    const exam = holder.dataset.exam, subject = holder.dataset.subject, full = Number(holder.dataset.full) || 100;
+    let saved = 0, bad = 0;
+    holder.querySelectorAll("[data-bulk-id]").forEach(inp => {
+      const id = inp.dataset.bulkId;
+      const abs = holder.querySelector('[data-bulk-abs="' + id + '"]').checked;
+      const raw = inp.value.trim();
+      if(!abs && raw === "") return;
+      const n = Number(raw);
+      if(!abs && (!isFinite(n) || n < 0 || n > full)){ bad++; return; }
+      let rec = db.results.find(r => r.studentId === id && r.examName === exam && r.subject === subject);
+      if(!rec){ rec = { id: uid(), studentId: id, examName: exam, subject }; db.results.unshift(rec); }
+      rec.fullMarks = String(full); rec.obtained = abs ? "0" : String(n); rec.absent = abs;
+      saved++;
+    });
+    if(bad){ alert(bn(bad) + " জনের নম্বর পূর্ণমানের চেয়ে বেশি বা ভুল। সেগুলো সংরক্ষণ হয়নি।"); }
+    saveDB(); miscState.tabExamName = exam; renderContent();
+    alert(bn(saved) + " জনের নম্বর সংরক্ষণ করা হয়েছে।");
+    return;
+  }
   if(e.target.closest('[data-action="print-seat-plan"]')){ printSeatPlan(boxValues("seatPlanBox")); return; }
   if(e.target.closest('[data-action="save-seat-numbers"]')){ saveSeatNumbers(boxValues("seatPlanBox")); return; }
   if(e.target.closest('[data-action="print-marks-sheet"]')){ printMarksSheet(boxValues("marksBox")); return; }
