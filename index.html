@@ -183,7 +183,7 @@ function defaultDB(){
     libraryLoans:[], patronMembers:[], patronPayments:[],
     teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[],
     activityLog:[], paymentClaims:[],
-    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[]
+    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[], certConfig:{}, certLog:[]
   };
 }
 function loadDB(){
@@ -871,6 +871,7 @@ const NAV = [
   {id:"seatPlan", label:"সিট প্ল্যান ও নম্বরপত্র", icon:"🪑"},
   {id:"books", label:"কিতাব লাইব্রেরি", icon:"📚"},
   {id:"results", label:"ফলাফল", icon:"🎓"},
+  {id:"certs", label:"সনদ ও প্রশংসাপত্র", icon:"🏅"},
   {id:"patrons", label:"বদরী সদস্য", icon:"🤝"},
   {id:"monthlyReport", label:"মাসিক আয়-ব্যয়ের হিসাব", icon:"📊"},
   {id:"activityLog", label:"অ্যাক্টিভিটি লগ", icon:"📝"},
@@ -1074,6 +1075,7 @@ function renderTab(tab){
   if(tab === "classRoutine") return renderClassRoutineTab();
   if(tab === "examRoutine") return renderExamRoutineTab();
   if(tab === "seatPlan") return renderSeatPlanTab();
+  if(tab === "certs") return renderCertsTab();
   if(tab === "books") return renderBooksTab();
   if(tab === "results") return renderResultsTab();
   if(tab === "monthlyReport") return renderMonthlyReportTab();
@@ -2163,7 +2165,7 @@ function tabulationData(){ return { subjects: [], rows: [] }; }
 const RES_NUM = (v, d) => { const n = Number(v); return (v === "" || v == null || !isFinite(n)) ? d : n; };
 function resultCfg(){
   const c = db.resultConfig || {};
-  return { mumtaz: RES_NUM(c.mumtaz,80), jiddan: RES_NUM(c.jiddan,65), jayyid: RES_NUM(c.jayyid,50), maqbul: RES_NUM(c.maqbul,33), passMark: RES_NUM(c.passMark,33) };
+  return { mumtaz: RES_NUM(c.mumtaz,80), jiddan: RES_NUM(c.jiddan,65), jayyid: RES_NUM(c.jayyid,50), maqbul: RES_NUM(c.maqbul,33), passMark: RES_NUM(c.passMark,33), enforce: c.enforce === true };
 }
 function divisionKey(pct, cfg){
   cfg = cfg || resultCfg();
@@ -2173,7 +2175,8 @@ function divisionKey(pct, cfg){
   if(pct >= cfg.maqbul) return "maqbul";
   return "rasib";
 }
-const DIVISION_LABELS = { mumtaz:"মুমতাজ (স্টার মার্ক)", jiddan:"জায়্যিদ জিদ্দান (১ম বিভাগ)", jayyid:"জায়্যিদ (২য় বিভাগ)", maqbul:"মাকবুল (৩য় বিভাগ)", rasib:"রাসিব (অকৃতকার্য)" };
+const DIVISION_LABELS = { mumtaz:"মুমতাজ", jiddan:"জায়্যিদ জিদ্দান", jayyid:"জায়্যিদ", maqbul:"মাকবুল", rasib:"রাসিব" };
+const DIVISION_SHORT = { mumtaz:"মুমতাজ", jiddan:"জা: জিদ্দান", jayyid:"জায়্যিদ", maqbul:"মাকবুল", rasib:"রাসিব" };
 function gradeOf(pct){
   const k = divisionKey(pct);
   return [DIVISION_LABELS[k], k === "rasib" ? "due" : (k === "mumtaz" || k === "jiddan") ? "paid" : "gold"];
@@ -2208,15 +2211,16 @@ function computeClassResults(examName, classFilter){
       const absent = !!rec.absent;
       const got = absent ? 0 : (Number(rec.obtained) || 0);
       const need = Math.ceil(full * cfg.passMark / 100);
-      return { sub, full, got, absent, need, failSub: absent || got < need };
+      return { sub, full, got, absent, need, failSub: cfg.enforce && (absent || got < need) };
     });
     const have = items.filter(i => !i.missing);
     const total = have.reduce((a,i) => a + i.got, 0);
     const fullTotal = have.reduce((a,i) => a + i.full, 0);
     const pct = fullTotal ? total / fullTotal * 100 : 0;
     const incomplete = items.some(i => i.missing);
-    const passed = !incomplete && !items.some(i => i.failSub);
-    const divKey = passed ? divisionKey(pct, cfg) : "rasib";
+    const divRaw = divisionKey(pct, cfg);
+    const passed = !incomplete && !items.some(i => i.failSub) && divRaw !== "rasib";
+    const divKey = passed ? divRaw : "rasib";
     rows.push({ student: s, items, total, fullTotal, pct, incomplete, passed, divKey, position: null,
       status: incomplete ? "incomplete" : (passed ? "pass" : "fail") });
   });
@@ -2244,7 +2248,9 @@ function resultSummary(list){
   return c;
 }
 function statusLabel(r){ return r.status === "incomplete" ? "নম্বর বাকি" : r.passed ? "উত্তীর্ণ" : "অনুত্তীর্ণ"; }
-function divisionShort(r){ return r.status === "incomplete" ? "—" : (r.passed ? DIVISION_LABELS[r.divKey] : "রাসিব"); }
+function divisionShort(r){ return r.status === "incomplete" ? "—" : (r.passed ? DIVISION_SHORT[r.divKey] : "রাসিব"); }
+function divisionFull(r){ return r.status === "incomplete" ? "—" : (r.passed ? DIVISION_LABELS[r.divKey] : "রাসিব"); }
+function divisionRuleText(cfg){ return "শতকরা নম্বর অনুযায়ী বিভাগ: মুমতাজ " + bn(cfg.mumtaz) + "%+ • জা: জিদ্দান " + bn(cfg.jiddan) + "%+ • জায়্যিদ " + bn(cfg.jayyid) + "%+ • মাকবুল " + bn(cfg.maqbul) + "%+ • রাসিব " + bn(cfg.maqbul) + "%-এর নিচে" + (cfg.enforce ? " • প্রতি বিষয়ে ন্যূনতম পাস নম্বর " + bn(cfg.passMark) + "% (নিচে/অনুপস্থিত হলে রাসিব)" : ""); }
 function resultDocShell(title, bodyHTML, orientation, extraCss){
   return `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title)}</title>
   <style>
@@ -2296,7 +2302,7 @@ function printTabulation(isMerit){
     if(isMerit){
       const passed = g.rows.filter(r => r.passed);
       table = `<table><thead><tr><th>মেধাক্রম</th><th>আইডি</th><th>ছাত্রের নাম</th><th>মোট নম্বর</th><th>শতকরা</th><th>বিভাগ</th></tr></thead><tbody>${
-        passed.length ? passed.map(r => `<tr><td><b>${bnOrdinal(r.position)}</b></td><td>${esc(r.student.sid||"-")}</td><td class="l">${esc(r.student.name)}</td><td>${bn(r.total)}/${bn(r.fullTotal)}</td><td>${bn(Math.round(r.pct*100)/100)}%</td><td>${esc(DIVISION_LABELS[r.divKey])}</td></tr>`).join("")
+        passed.length ? passed.map(r => `<tr><td><b>${bnOrdinal(r.position)}</b></td><td>${esc(r.student.sid||"-")}</td><td class="l">${esc(r.student.name)}</td><td>${bn(r.total)}/${bn(r.fullTotal)}</td><td>${bn(Math.round(r.pct*100)/100)}%</td><td>${esc(DIVISION_SHORT[r.divKey])}</td></tr>`).join("")
         : `<tr><td colspan="6">কোনো ছাত্র উত্তীর্ণ হয়নি</td></tr>`}</tbody></table>`;
     } else {
       table = `<table><thead><tr><th>মেধাক্রম</th><th>আইডি</th><th>ছাত্রের নাম</th>${g.subjects.map(sub => { const fm = (g.rows.map(r => r.items.find(i => i.sub === sub)).find(i => i && !i.missing) || {}).full; return `<th class="vt"><span>${esc(sub)}</span>${fm ? `<div class="fm">(${bn(fm)})</div>` : ""}</th>`; }).join("")}<th>মোট</th><th>শতকরা</th><th>বিভাগ</th><th>ফলাফল</th></tr></thead><tbody>${
@@ -2306,7 +2312,7 @@ function printTabulation(isMerit){
     }
     const title = (isMerit ? "মেধা তালিকা" : "ফলাফল শীট") + " — " + examName + " — " + g.className;
     return `<section class="sect">${fancyHeaderHTML({ title, compact: true })}${summaryLineHTML(g.summary)}${table}
-      <div style="margin-top:6px;font-size:11.5px;color:#555;">প্রতি বিষয়ে পাস নম্বর: ${bn(res.cfg.passMark)}% | মুমতাজ ${bn(res.cfg.mumtaz)}%+ | জায়্যিদ জিদ্দান ${bn(res.cfg.jiddan)}%+ | জায়্যিদ ${bn(res.cfg.jayyid)}%+ | মাকবুল ${bn(res.cfg.maqbul)}%+ | লাল নম্বর = পাস নম্বরের নিচে/অনুপস্থিত</div>
+      <div style="margin-top:6px;font-size:11.5px;color:#555;">${divisionRuleText(res.cfg)}${res.cfg.enforce ? " • লাল নম্বর = পাস নম্বরের নিচে/অনুপস্থিত" : ""}</div>
       ${resultSignsHTML()}</section>`;
   }).join("");
   openResultDoc(resultDocShell(isMerit ? "মেধা তালিকা" : "ফলাফল শীট", body, isMerit ? "portrait" : "landscape"));
@@ -2326,8 +2332,16 @@ function printMarksheets(examName, classFilter, onlyId){
   const pubFor = cn => { const p = (db.resultPublish || []).find(x => x.examName === examName && (x.className === "all" || x.className === cn)); return p ? fmtDate(p.date) : ""; };
   const pages = rows.map(r => {
     const s = r.student;
-    const trs = r.items.map((i, idx) => `<tr><td>${bn(idx+1)}</td><td class="l">${esc(i.sub)}</td><td>${bn(i.full)}</td><td>${bn(i.need)}</td>
-      <td class="${i.failSub?"red":""}"><b>${i.absent ? "অনুপস্থিত" : bn(i.got)}</b></td><td class="${i.failSub?"red":""}">${i.failSub ? "অনুত্তীর্ণ" : "উত্তীর্ণ"}</td></tr>`).join("");
+    const enf = cfg.enforce;
+    const trs = r.items.map((i, idx) => enf
+      ? `<tr><td>${bn(idx+1)}</td><td class="l">${esc(i.sub)}</td><td>${bn(i.full)}</td><td>${bn(i.need)}</td><td class="${i.failSub?"red":""}"><b>${i.absent ? "অনুপস্থিত" : bn(i.got)}</b></td><td class="${i.failSub?"red":""}">${i.failSub ? "অনুত্তীর্ণ" : "উত্তীর্ণ"}</td></tr>`
+      : `<tr><td>${bn(idx+1)}</td><td class="l">${esc(i.sub)}</td><td>${bn(i.full)}</td><td><b>${i.absent ? "অনুপস্থিত" : bn(i.got)}</b></td><td>${i.absent ? "০" : bn(Math.round(i.got / i.full * 10000) / 100)}%</td></tr>`).join("");
+    const thead = enf
+      ? `<tr><th style="width:8%">ক্রম</th><th>বিষয়</th><th style="width:14%">পূর্ণমান</th><th style="width:14%">পাস নম্বর</th><th style="width:16%">প্রাপ্ত নম্বর</th><th style="width:15%">ফলাফল</th></tr>`
+      : `<tr><th style="width:8%">ক্রম</th><th>বিষয়</th><th style="width:16%">পূর্ণমান</th><th style="width:18%">প্রাপ্ত নম্বর</th><th style="width:18%">শতকরা</th></tr>`;
+    const totalRow = enf
+      ? `<tr><td colspan="2"><b>সর্বমোট</b></td><td><b>${bn(r.fullTotal)}</b></td><td></td><td><b>${bn(r.total)}</b></td><td></td></tr>`
+      : `<tr><td colspan="2"><b>সর্বমোট</b></td><td><b>${bn(r.fullTotal)}</b></td><td><b>${bn(r.total)}</b></td><td><b>${bn(Math.round(r.pct*100)/100)}%</b></td></tr>`;
     const words = Number.isInteger(r.total) ? bnIntWords(r.total) + " মাত্র" : "";
     const pdate = pubFor(s.className);
     return `<section class="ms"><div class="wm"><img src="${logo}" alt=""></div><div class="in">
@@ -2343,16 +2357,15 @@ function printMarksheets(examName, classFilter, onlyId){
           <div><span>সিট নং:</span><b>${s.seatNo ? esc(bn(s.seatNo)) : ""}</b></div>
         </div>
       </div>
-      <table><thead><tr><th style="width:8%">ক্রম</th><th>বিষয়</th><th style="width:14%">পূর্ণমান</th><th style="width:14%">পাস নম্বর</th><th style="width:16%">প্রাপ্ত নম্বর</th><th style="width:15%">ফলাফল</th></tr></thead>
-        <tbody>${trs}<tr><td colspan="2"><b>সর্বমোট</b></td><td><b>${bn(r.fullTotal)}</b></td><td></td><td><b>${bn(r.total)}</b></td><td></td></tr></tbody></table>
+      <table><thead>${thead}</thead><tbody>${trs}${totalRow}</tbody></table>
       ${words ? `<div class="words">মোট প্রাপ্ত নম্বর (কথায়): <b>${esc(words)}</b></div>` : ""}
       <div class="boxes">
         <div><span>শতকরা নম্বর</span><b>${bn(Math.round(r.pct*100)/100)}%</b></div>
-        <div><span>বিভাগ</span><b class="${r.passed?"":"red"}">${esc(divisionShort(r))}</b></div>
+        <div><span>বিভাগ</span><b class="${r.passed?"":"red"}">${esc(divisionFull(r))}</b></div>
         <div><span>মেধাক্রম</span><b>${r.position ? bnOrdinal(r.position) : "—"}</b></div>
         <div><span>ফলাফল</span><b class="${r.passed?"":"red"}">${statusLabel(r)}</b></div>
       </div>
-      <div class="scale">নম্বর বিভাজন: মুমতাজ (স্টার মার্ক) ${bn(cfg.mumtaz)}% ও তদূর্ধ্ব • জায়্যিদ জিদ্দান (১ম) ${bn(cfg.jiddan)}% • জায়্যিদ (২য়) ${bn(cfg.jayyid)}% • মাকবুল (৩য়) ${bn(cfg.maqbul)}% • প্রতি বিষয়ে ন্যূনতম পাস নম্বর ${bn(cfg.passMark)}%। কোনো বিষয়ে অকৃতকার্য হলে সামগ্রিক ফলাফল রাসিব (অকৃতকার্য) গণ্য হবে।</div>
+      <div class="scale">${esc(divisionRuleText(cfg))}।</div>
       <div class="pub">ফলাফল প্রকাশের তারিখ: ${pdate ? "<b>"+pdate+"</b>" : "...................."}</div>
       ${resultSignsHTML()}
     </div></section>`;
@@ -2394,7 +2407,7 @@ function printResultGazette(examName){
     <table><thead><tr><th>শ্রেণি/জামাত</th><th>পরীক্ষার্থী</th><th>উত্তীর্ণ</th><th>অনুত্তীর্ণ</th><th>মুমতাজ</th><th>জায়্যিদ জিদ্দান</th><th>জায়্যিদ</th><th>মাকবুল</th><th>পাসের হার</th></tr></thead>
     <tbody>${res.groups.map(g => rowHTML(g.className, g.summary)).join("")}${rowHTML("সর্বমোট", all, true)}</tbody></table>
     ${top ? `<h3 style="margin:16px 0 6px;font-size:15px;color:#14432A;">মেধা তালিকা — শ্রেণিভিত্তিক শীর্ষ ৩ জন</h3><table><tbody>${top}</tbody></table>` : ""}
-    <div style="margin-top:8px;font-size:11.5px;color:#555;">মুমতাজ ${bn(res.cfg.mumtaz)}%+ • জায়্যিদ জিদ্দান ${bn(res.cfg.jiddan)}%+ • জায়্যিদ ${bn(res.cfg.jayyid)}%+ • মাকবুল ${bn(res.cfg.maqbul)}%+ • প্রতি বিষয়ে পাস নম্বর ${bn(res.cfg.passMark)}%</div>
+    <div style="margin-top:8px;font-size:11.5px;color:#555;">${esc(divisionRuleText(res.cfg))}</div>
     <div class="signs"><div>পরীক্ষা নিয়ন্ত্রকের স্বাক্ষর</div><div>নাযেমে তা'লীমাতের স্বাক্ষর</div><div>মুহতামিমের স্বাক্ষর</div></div></section>`;
   openResultDoc(resultDocShell("ফলাফল ঘোষণা", body, "portrait"));
 }
@@ -2465,14 +2478,15 @@ function renderResultsTab(){
       <div class="tbl-body" id="tbl-results">${resultsTableHTML()}</div>
     </div>
 
-    <details class="arch form-card" style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">⚙️ ফলাফলের নিয়ম (নম্বর বিভাজন ও পাস নম্বর)</summary>
-      <p style="font-size:12px;color:#5B6357;margin:8px 0;">শতকরা নম্বর অনুযায়ী বিভাগ ঠিক হয়। আপনার বোর্ড বা মাদরাসার বিজ্ঞপ্তির সাথে মিলিয়ে নিন। কোনো বিষয়ে পাস নম্বরের নিচে বা অনুপস্থিত হলে সামগ্রিক ফলাফল রাসিব (অকৃতকার্য) হবে।</p>
+    <details class="arch form-card" style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">⚙️ ফলাফলের নিয়ম (বিভাগ ও শতকরা নম্বর)</summary>
+      <p style="font-size:12px;color:#5B6357;margin:8px 0;">বিভাগ (মুমতাজ, জা: জিদ্দান, জায়্যিদ, মাকবুল, রাসিব) সব বিষয়ের মোট নম্বরের শতকরা হার দিয়ে ঠিক হয়। নিচে প্রতি বিভাগের ন্যূনতম শতকরা নম্বর দিন। এর নিচে হলে রাসিব (অকৃতকার্য)। আপনার বোর্ড বা মাদরাসার বিজ্ঞপ্তির সাথে মিলিয়ে নিন।</p>
       <form class="grid" data-form="resultConfig" style="grid-template-columns:repeat(2,1fr);">
-        ${num("mumtaz","মুমতাজ (স্টার মার্ক) — শতকরা ন্যূনতম",cfg.mumtaz)}
-        ${num("jiddan","জায়্যিদ জিদ্দান (১ম বিভাগ) — ন্যূনতম",cfg.jiddan)}
-        ${num("jayyid","জায়্যিদ (২য় বিভাগ) — ন্যূনতম",cfg.jayyid)}
-        ${num("maqbul","মাকবুল (৩য় বিভাগ) — ন্যূনতম",cfg.maqbul)}
-        ${num("passMark","প্রতি বিষয়ে পাস নম্বর (%)",cfg.passMark)}
+        ${num("mumtaz","মুমতাজ — শতকরা ন্যূনতম",cfg.mumtaz)}
+        ${num("jiddan","জায়্যিদ জিদ্দান — ন্যূনতম",cfg.jiddan)}
+        ${num("jayyid","জায়্যিদ — ন্যূনতম",cfg.jayyid)}
+        ${num("maqbul","মাকবুল — ন্যূনতম (এর নিচে রাসিব)",cfg.maqbul)}
+        <label class="field" style="grid-column:span 2;flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" name="enforce" ${cfg.enforce?"checked":""}> <span>প্রতি বিষয়ে আলাদা পাস নম্বরও বাধ্যতামূলক (কোনো বিষয়ে কম বা অনুপস্থিত হলে রাসিব)</span></label>
+        ${num("passMark","প্রতি বিষয়ে পাস নম্বর (%) — উপরের টিক দিলেই কাজ করবে",cfg.passMark)}
         <div class="btn-end"><button class="btn" type="submit">💾 সংরক্ষণ</button></div>
       </form>
     </details>
@@ -2506,6 +2520,201 @@ function renderResultsTab(){
       </div>
       <div style="overflow-x:auto;margin-top:14px;">${resultPreviewHTML()}</div>`}
     </div>`;
+}
+
+/* ============================ সনদপত্র ও প্রশংসাপত্র ============================ */
+function certCfg(){
+  const c = db.certConfig || {};
+  return { session: c.session === undefined ? "" : c.session, left: c.left || "শ্রেণি শিক্ষক", center: c.center || "নাযেমে তা'লীমাত", right: c.right || "মুহতামিম" };
+}
+function certNo(studentId, type, exam){
+  db.certLog = db.certLog || [];
+  let e = db.certLog.find(x => x.studentId === studentId && x.type === type && (x.exam || "") === (exam || ""));
+  if(!e){
+    const n = db.certLog.filter(x => x.type === type).reduce((m, x) => Math.max(m, x.no), 0) + 1;
+    e = { no: n, studentId, type, exam: exam || "", date: todayISO() };
+    db.certLog.push(e); saveDB();
+  }
+  return bn(String(e.no).padStart(3, "0"));
+}
+const PRAISE_REASONS = {
+  "অসাধারণ ফলাফল অর্জন": it => `${it.exam ? it.exam + "-এ " : ""}অসাধারণ ফলাফল অর্জন করিয়া মাদরাসার মুখ উজ্জ্বল করিয়াছে।`,
+  "মেধা তালিকায় স্থান অর্জন": it => it.position ? `${it.exam ? it.exam + "-এ " : ""}শ্রেণিতে <span class="hl">${bnOrdinal(it.position)}</span> স্থান অধিকার করিয়া মেধার স্বাক্ষর রাখিয়াছে।` : "শ্রেণির মেধা তালিকায় উল্লেখযোগ্য স্থান অর্জন করিয়াছে।",
+  "নিয়মিত উপস্থিতি ও শৃঙ্খলা": () => "সারা বৎসর নিয়মিত উপস্থিতি ও শৃঙ্খলা বজায় রাখিয়াছে।",
+  "উত্তম আচরণ ও আদর্শ চরিত্র": () => "উত্তম আচরণ, আদব-আখলাক ও আদর্শ চরিত্রের পরিচয় দিয়াছে।",
+  "হিফজুল কুরআন সম্পন্ন": () => "মহান আল্লাহর অশেষ রহমতে পবিত্র কুরআনুল কারীম হিফজ সম্পন্ন করিয়াছে।",
+  "প্রতিযোগিতায় কৃতিত্ব": () => "প্রতিযোগিতায় কৃতিত্বপূর্ণ অংশগ্রহণের জন্য প্রশংসার দাবিদার হইয়াছে।"
+};
+function certHl(t){ return `<span class="hl">${esc(t)}</span>`; }
+function sanadText(it){
+  const s = it.student;
+  const sess = it.session ? ` ${certHl(it.session)} শিক্ষাবর্ষে` : "";
+  let achieve;
+  if(it.row){
+    achieve = `${it.exam ? certHl(it.exam) + "-এ " : ""}অংশগ্রহণ করিয়া শতকরা ${certHl(bn(Math.round(it.row.pct * 100) / 100) + "%")} নম্বর প্রাপ্তির মাধ্যমে ${certHl(divisionFull(it.row))} বিভাগে উত্তীর্ণ হইয়াছে${it.row.position ? `, শ্রেণিতে মেধাক্রম ${certHl(bnOrdinal(it.row.position))}` : ""}।`;
+  } else if(it.manualDiv && DIVISION_LABELS[it.manualDiv]){
+    achieve = `${it.exam ? certHl(it.exam) + "-এ " : ""}সফলভাবে উত্তীর্ণ হইয়া ${certHl(DIVISION_LABELS[it.manualDiv])} বিভাগ অর্জন করিয়াছে।`;
+  } else {
+    achieve = "পাঠ্যক্রম সফলভাবে সম্পন্ন করিয়াছে।";
+  }
+  return `আলহামদুলিল্লাহ। এই মর্মে সনদ প্রদান করা হইতেছে যে, ${certHl(s.name)}, পিতা: ${certHl(s.fatherName || "................")}, ছাত্র আইডি: ${certHl(s.sid || "-")}, অত্র মাদরাসার ${certHl(s.className)} জামাতে${sess} অধ্যয়ন করিয়া ${achieve} আমরা তাহার উজ্জ্বল ভবিষ্যৎ ও দীনের খিদমতে সফলতা কামনা করি।`;
+}
+function praiseText(it){
+  const s = it.student;
+  let why = (it.custom || "").trim() ? esc(it.custom.trim()) : (PRAISE_REASONS[it.reason] || PRAISE_REASONS["অসাধারণ ফলাফল অর্জন"])(it);
+  return `এই মর্মে প্রশংসাপত্র প্রদান করা হইতেছে যে, ${certHl(s.name)}${s.fatherName ? `, পিতা: ${certHl(s.fatherName)}` : ""}, অত্র মাদরাসার ${certHl(s.className)} জামাতের ছাত্র, ${why} তাহার এই কৃতিত্বে মাদরাসা পরিবার গর্বিত। আমরা তাহার উত্তরোত্তর সাফল্য কামনা করি এবং আল্লাহ তা'আলার দরবারে দু'আ করি।`;
+}
+function certPageHTML(it){
+  const cfg = certCfg();
+  const logo = getBrandLogo();
+  const isSanad = it.type === "sanad";
+  const no = certNo(it.student.id, isSanad ? "sanad" : "praise", it.exam || (isSanad ? "" : it.reason));
+  const sc = (Number(getBrandingConfig().titleScale) || 100) / 100;
+  return `<section class="cert">
+    <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
+    <div class="wm"><img src="${logo}" alt=""></div>
+    <div class="in">
+      <div class="bis">بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ</div>
+      <div class="top">
+        <div class="lg"><img src="${logo}" alt="লোগো"></div>
+        <div class="nm">${brandArabicHTML(38, "#14432A")}<div class="bn" style="font-size:${Math.round(30 * sc)}px">${esc(getBrandTitle())}</div><div class="ad">${esc(getBrandSub())}</div></div>
+        <div class="ph">${it.student.photo ? `<img src="${it.student.photo}" alt="">` : ""}</div>
+      </div>
+      <div class="ttl"><span>${isSanad ? "সনদপত্র" : "প্রশংসাপত্র"}</span></div>
+      <div class="meta"><div>${isSanad ? "সনদ নং" : "প্রশংসাপত্র নং"}: <b>${no}</b></div><div>তারিখ: <b>${it.date ? fmtDate(it.date) : "............"}</b></div></div>
+      <p class="body">${isSanad ? sanadText(it) : praiseText(it)}</p>
+      <div class="foot">
+        <div class="sg">${esc(cfg.left)}</div>
+        <div class="seal">সিল</div>
+        <div class="sg">${esc(cfg.center)}</div>
+        <div class="sg">${esc(cfg.right)}</div>
+      </div>
+    </div></section>`;
+}
+function printCertificates(items){
+  if(!items.length){ alert("প্রিন্ট করার মতো কিছু পাওয়া যায়নি।"); return; }
+  const pages = items.map(certPageHTML).join("");
+  const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>সনদ</title>
+  <style>
+    @page{size:A4 landscape;margin:8mm;}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#1F2A1C;margin:0;}
+    .cert{position:relative;height:194mm;page-break-after:always;overflow:hidden;background:#fff;border:7px double #14432A;padding:8mm 14mm;}
+    .cert:last-child{page-break-after:auto;}
+    .cert::before{content:"";position:absolute;inset:3mm;border:1.6px solid #C9A227;pointer-events:none;}
+    .cn{position:absolute;width:13mm;height:13mm;border:3px solid #C9A227;z-index:2;}
+    .cn.tl{left:5mm;top:5mm;border-right:0;border-bottom:0;} .cn.tr{right:5mm;top:5mm;border-left:0;border-bottom:0;}
+    .cn.bl{left:5mm;bottom:5mm;border-right:0;border-top:0;} .cn.br{right:5mm;bottom:5mm;border-left:0;border-top:0;}
+    .wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+    .wm img{width:125mm;height:125mm;object-fit:contain;opacity:.07;}
+    .in{position:relative;z-index:1;height:100%;display:flex;flex-direction:column;}
+    .bis{text-align:center;font-family:'Aref Ruqaa','Amiri','Noto Naskh Arabic',serif;font-size:20px;color:#14432A;}
+    .top{display:flex;align-items:center;gap:10px;margin-top:2px;}
+    .lg{width:24mm;height:24mm;flex-shrink:0;border:3px solid #C9A227;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+    .lg img{width:92%;height:92%;object-fit:contain;}
+    .nm{flex:1;text-align:center;} .nm .bn{font-weight:800;color:#14432A;line-height:1.3;} .nm .ad{font-size:13px;color:#4A5547;margin-top:2px;}
+    .ph{width:24mm;height:28mm;flex-shrink:0;} .ph img{width:100%;height:100%;object-fit:cover;border:2px solid #C9A227;}
+    .ttl{text-align:center;margin:8px 0 4px;}
+    .ttl span{display:inline-block;font-size:34px;font-weight:800;color:#fff;background:linear-gradient(135deg,#0E3320,#14432A 50%,#1F6B42);border:3px solid #C9A227;border-radius:40px;padding:2px 54px;letter-spacing:1px;}
+    .meta{display:flex;justify-content:space-between;font-size:15px;margin:6px 4px 0;}
+    .body{font-size:23px;line-height:2.25;text-align:justify;text-indent:2.4em;margin:auto 8px;flex:none;}
+    .hl{font-weight:800;color:#14432A;border-bottom:1.5px dotted #14432A;padding:0 3px;}
+    .foot{display:flex;justify-content:space-between;align-items:flex-end;margin:0 4px 2px;}
+    .sg{border-top:1.5px solid #000;padding-top:3px;min-width:54mm;text-align:center;font-size:15px;font-weight:600;}
+    .seal{width:24mm;height:24mm;border:2px dashed #8AA08F;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#8AA08F;font-size:13px;}
+    @media screen{ body{padding:10px;background:#eee;} .cert{margin-bottom:12px;} }
+  </style></head><body>${pages}</body></html>`;
+  openResultDoc(html);
+}
+function renderCertsTab(){
+  const order = allClassNames();
+  const sorted = db.students.slice().sort((a,b) => (order.indexOf(a.className) - order.indexOf(b.className)) || ((parseInt(sidKey(a.sid),10)||0) - (parseInt(sidKey(b.sid),10)||0)));
+  const sOpts = `<option value="">— ছাত্র নির্বাচন করুন —</option>` + sorted.map(s => `<option value="${s.id}">${esc(s.className)} — ${s.sid ? esc(s.sid) + ". " : ""}${esc(s.name)}</option>`).join("");
+  const exams = allExamNames();
+  const eOpts = `<option value="">— পরীক্ষা ছাড়া —</option>` + exams.map(n => `<option>${esc(n)}</option>`).join("");
+  const cOpts = allClassNames().map(c => `<option>${esc(c)}</option>`).join("");
+  const cfg = certCfg();
+  if(!db.students.length) return `<div class="sec-head"><div class="badge">🏅</div><div><h2>সনদ ও প্রশংসাপত্র</h2></div></div><div class="empty">প্রথমে 'ছাত্র ভর্তি' অংশে ছাত্র যোগ করুন।</div>`;
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  return `
+    <div class="sec-head"><div class="badge">🏅</div><div><h2>সনদপত্র, নম্বরপত্র ও প্রশংসাপত্র</h2><p>ছাত্রদের জন্য সুন্দর নকশায় সনদ ও প্রশংসাপত্র প্রিন্ট করুন</p></div></div>
+    <div class="arch form-card" id="certBox">
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);">
+        ${fld("ছাত্র (একজনের জন্য)", `<select name="student">${sOpts}</select>`, 2)}
+        ${fld("পরীক্ষা (ফলাফল থেকে বিভাগ/মেধাক্রম আসবে)", `<select name="exam">${eOpts}</select>`)}
+        ${fld("শ্রেণি (সকলের জন্য প্রিন্টে)", `<select name="cls">${cOpts}</select>`)}
+        ${fld("শিক্ষাবর্ষ (যেমনঃ ১৪৪৭-৪৮ হিজরী / ২০২৬ ইং)", `<input name="session" value="${esc(cfg.session)}">`, 2)}
+        ${fld("প্রদানের তারিখ", `<input name="date" type="date" value="${todayISO()}">`)}
+        ${fld("পরীক্ষা ছাড়া হলে বিভাগ", `<select name="manualDiv"><option value="">— উল্লেখ করবেন না —</option>${Object.keys(DIVISION_LABELS).filter(k => k !== "rasib").map(k => `<option value="${k}">${DIVISION_LABELS[k]}</option>`).join("")}</select>`)}
+        ${fld("স্বাক্ষর ১ (বাম)", `<input name="left" value="${esc(cfg.left)}">`)}
+        ${fld("স্বাক্ষর ২ (মাঝ)", `<input name="center" value="${esc(cfg.center)}">`)}
+        ${fld("স্বাক্ষর ৩ (ডান)", `<input name="right" value="${esc(cfg.right)}">`)}
+      </div>
+      <div style="margin-top:12px;font-weight:700;">📜 সনদপত্র</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+        <button class="btn" type="button" data-action="cert-sanad-one">🖨 একজনের সনদ</button>
+        <button class="btn ghost" type="button" data-action="cert-sanad-class">🖨 শ্রেণির সকল উত্তীর্ণ ছাত্রের সনদ</button>
+      </div>
+      <div style="margin-top:14px;font-weight:700;">🏆 প্রশংসাপত্র</div>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:6px;">
+        ${fld("প্রশংসার কারণ", `<select name="reason">${Object.keys(PRAISE_REASONS).map(k => `<option>${k}</option>`).join("")}</select>`, 2)}
+        ${fld("নিজের মতো লিখতে চাইলে (লিখলে উপরের কারণের বদলে এটি বসবে)", `<textarea name="custom" rows="2" style="width:100%;font-family:inherit;font-size:15px;padding:8px;border:1px solid #C9CFC0;border-radius:8px;"></textarea>`, 2)}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn" type="button" data-action="cert-praise-one">🖨 একজনের প্রশংসাপত্র</button>
+        <button class="btn ghost" type="button" data-action="cert-praise-top3">🥇 শ্রেণির শীর্ষ ৩ জনের প্রশংসাপত্র</button>
+      </div>
+      <div style="margin-top:14px;font-weight:700;">📝 নম্বরপত্র (মার্কশীট)</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+        <button class="btn ghost" type="button" data-action="cert-marksheet-one">🖨 একজনের নম্বরপত্র</button>
+        <button class="btn ghost" type="button" data-action="cert-marksheet-class">🖨 শ্রেণির সকলের নম্বরপত্র</button>
+      </div>
+      <p style="font-size:12px;color:#5B6357;margin:10px 0 0;">সনদ ও প্রশংসাপত্রের নম্বর নিজে থেকে বসে এবং একই ছাত্রের একই সনদ আবার প্রিন্ট করলে একই নম্বর থাকে। পরীক্ষা বেছে নিলে ছাত্রের শতকরা নম্বর, বিভাগ ও মেধাক্রম ফলাফল থেকে সনদে আসবে।</p>
+    </div>`;
+}
+function certAction(kind){
+  const v = boxValues("certBox");
+  db.certConfig = { session: v.session || "", left: v.left, center: v.center, right: v.right };
+  saveDB();
+  const stu = id => db.students.find(x => x.id === id);
+  const rowFor = (st, exam) => {
+    if(!exam) return null;
+    const r = computeClassResults(exam, st.className);
+    const g = r.groups.find(x => x.className === st.className);
+    return g ? (g.rows.find(x => x.student.id === st.id) || null) : null;
+  };
+  if(kind === "sanad-one"){
+    const st = stu(v.student); if(!st){ alert("ছাত্র নির্বাচন করুন।"); return; }
+    const row = rowFor(st, v.exam);
+    if(v.exam && !row){ alert("এই ছাত্রের এই পরীক্ষার ফলাফল পাওয়া যায়নি।"); return; }
+    if(row && !row.passed){ alert(row.status === "incomplete" ? "এই ছাত্রের নম্বর এন্ট্রি অসম্পূর্ণ।" : "এই ছাত্র অনুত্তীর্ণ, তাই সনদ দেওয়া যাবে না।"); return; }
+    printCertificates([{ type:"sanad", student:st, exam:v.exam, row, session:v.session, date:v.date, manualDiv:v.manualDiv }]);
+  } else if(kind === "sanad-class"){
+    if(!v.exam){ alert("শ্রেণির সনদের জন্য পরীক্ষা নির্বাচন করুন।"); return; }
+    const r = computeClassResults(v.exam, v.cls);
+    const g = r.groups.find(x => x.className === v.cls);
+    const items = g ? g.rows.filter(x => x.passed).map(row => ({ type:"sanad", student:row.student, exam:v.exam, row, session:v.session, date:v.date })) : [];
+    if(!items.length){ alert("এই শ্রেণি ও পরীক্ষায় কোনো উত্তীর্ণ ছাত্র পাওয়া যায়নি।"); return; }
+    printCertificates(items);
+  } else if(kind === "praise-one"){
+    const st = stu(v.student); if(!st){ alert("ছাত্র নির্বাচন করুন।"); return; }
+    const row = rowFor(st, v.exam);
+    printCertificates([{ type:"praise", student:st, exam:v.exam, position: row && row.position, reason:v.reason, custom:v.custom, date:v.date }]);
+  } else if(kind === "praise-top3"){
+    if(!v.exam){ alert("পরীক্ষা নির্বাচন করুন।"); return; }
+    const r = computeClassResults(v.exam, v.cls);
+    const g = r.groups.find(x => x.className === v.cls);
+    const items = g ? g.rows.filter(x => x.passed && x.position <= 3).map(row => ({ type:"praise", student:row.student, exam:v.exam, position:row.position, reason:"মেধা তালিকায় স্থান অর্জন", custom:"", date:v.date })) : [];
+    if(!items.length){ alert("এই শ্রেণি ও পরীক্ষায় মেধা তালিকা পাওয়া যায়নি।"); return; }
+    printCertificates(items);
+  } else if(kind === "marksheet-one"){
+    if(!v.exam){ alert("পরীক্ষা নির্বাচন করুন।"); return; }
+    if(!v.student){ alert("ছাত্র নির্বাচন করুন।"); return; }
+    printMarksheets(v.exam, "all", v.student);
+  } else if(kind === "marksheet-class"){
+    if(!v.exam){ alert("পরীক্ষা নির্বাচন করুন।"); return; }
+    printMarksheets(v.exam, v.cls);
+  }
 }
 
 /* ============================ ছাত্র হাজিরা ============================ */
@@ -3774,7 +3983,7 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
   }
   if(type==="resultConfig"){
     const g = k => { const n = Number(fd.get(k)); return isFinite(n) ? Math.min(100, Math.max(0, n)) : undefined; };
-    const next = { mumtaz:g("mumtaz"), jiddan:g("jiddan"), jayyid:g("jayyid"), maqbul:g("maqbul"), passMark:g("passMark") };
+    const next = { mumtaz:g("mumtaz"), jiddan:g("jiddan"), jayyid:g("jayyid"), maqbul:g("maqbul"), passMark:g("passMark"), enforce: fd.get("enforce") === "on" };
     if(!(next.mumtaz >= next.jiddan && next.jiddan >= next.jayyid && next.jayyid >= next.maqbul)){ alert("নম্বর বিভাজন ক্রমানুসারে হতে হবে: মুমতাজ ≥ জায়্যিদ জিদ্দান ≥ জায়্যিদ ≥ মাকবুল।"); return; }
     db.resultConfig = next; saveDB(); renderContent(); alert("ফলাফলের নিয়ম সংরক্ষণ করা হয়েছে।"); return;
   }
@@ -5640,6 +5849,8 @@ document.addEventListener("click", function(e){
   if(rm){ const row = rm.closest(".fee-row"); if(row) row.remove(); return; }
   const np = e.target.closest("[data-notice-print]");
   if(np){ const n = (db.notices||[]).find(x => x.id === np.dataset.noticePrint); if(n) printNotice(n); return; }
+  const certBtn = e.target.closest('[data-action^="cert-"]');
+  if(certBtn){ certAction(certBtn.dataset.action.slice(5)); return; }
   if(e.target.closest('[data-action="print-marksheets"]')){ printMarksheets(miscState.tabExamName, miscState.tabClassFilter || "all"); return; }
   if(e.target.closest('[data-action="print-gazette"]')){ printResultGazette(miscState.tabExamName); return; }
   if(e.target.closest('[data-action="print-one-marksheet"]')){
