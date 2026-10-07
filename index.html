@@ -2510,11 +2510,15 @@ function renderResultsTab(){
         <button class="btn ghost" type="button" data-action="print-tabulation">📊 ফলাফল শীট</button>
         <button class="btn ghost" type="button" data-action="print-merit">🏆 মেধা তালিকা</button>
         <button class="btn" type="button" data-action="print-marksheets">🪪 সকল ছাত্রের মার্কশীট</button>
+        <button class="btn" type="button" data-action="res-sanad">📜 উত্তীর্ণদের সনদপত্র</button>
+        <button class="btn" type="button" data-action="res-praise">🏆 শীর্ষ ৩ জনের প্রশংসাপত্র</button>
         <button class="btn ghost" type="button" data-action="print-gazette">📢 ফলাফল ঘোষণা</button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;">
         <label class="field" style="flex:1;min-width:180px;"><span>একজনের মার্কশীট</span><select id="oneMarksheetStudent"><option value="">ছাত্র নির্বাচন করুন</option>${studentOptions}</select></label>
         <button class="btn ghost small" type="button" data-action="print-one-marksheet">🖨 মার্কশীট</button>
+        <button class="btn ghost small" type="button" data-action="res-sanad-one">📜 সনদ</button>
+        <button class="btn ghost small" type="button" data-action="res-praise-one">🏆 প্রশংসাপত্র</button>
       </div>
       <div style="margin-top:14px;padding:10px;border:1.5px solid #14432A;border-radius:10px;background:#F4FAEF;">
         <div style="font-weight:700;margin-bottom:6px;">${published ? "✅ এই পরীক্ষা ও শ্রেণির ফলাফল প্রকাশিত" : "⏳ এই ফলাফল এখনো অপ্রকাশিত"}</div>
@@ -2636,8 +2640,9 @@ function renderCertsTab(){
   const order = allClassNames();
   const sorted = db.students.slice().sort((a,b) => (order.indexOf(a.className) - order.indexOf(b.className)) || ((parseInt(sidKey(a.sid),10)||0) - (parseInt(sidKey(b.sid),10)||0)));
   const sOpts = `<option value="">— ছাত্র নির্বাচন করুন —</option>` + sorted.map(s => `<option value="${s.id}">${esc(s.className)} — ${s.sid ? esc(s.sid) + ". " : ""}${esc(s.name)}</option>`).join("");
-  const exams = allExamNames();
-  const eOpts = `<option value="">— পরীক্ষা ছাড়া —</option>` + exams.map(n => `<option>${esc(n)}</option>`).join("");
+  const exams = allExamNames().filter(n => db.results.some(r => r.examName === n));
+  const latestExam = (db.results.find(r => r.examName) || {}).examName || "";
+  const eOpts = `<option value="">— পরীক্ষা ছাড়া —</option>` + exams.map(n => `<option ${n === latestExam ? "selected" : ""}>${esc(n)}</option>`).join("");
   const cnt = c => db.students.filter(s => s.className === c).length;
   const firstWith = allClassNames().find(c => cnt(c) > 0);
   const cOpts = allClassNames().map(c => `<option value="${esc(c)}" ${c === firstWith ? "selected" : ""}>${esc(c)}${cnt(c) ? " (" + bn(cnt(c)) + " জন)" : ""}</option>`).join("");
@@ -2649,7 +2654,7 @@ function renderCertsTab(){
     <div class="arch form-card" id="certBox">
       <div class="grid" style="grid-template-columns:repeat(2,1fr);">
         ${fld("ছাত্র (একজনের জন্য)", `<select name="student">${sOpts}</select>`, 2)}
-        ${fld("পরীক্ষা (ফলাফল থেকে বিভাগ/মেধাক্রম আসবে)", `<select name="exam">${eOpts}</select>`)}
+        ${fld("পরীক্ষা (শুধু যে পরীক্ষার ফলাফল এন্ট্রি আছে সেগুলো দেখায়)", `<select name="exam">${eOpts}</select>`)}
         ${fld("শ্রেণি (সকলের জন্য প্রিন্টে)", `<select name="cls">${cOpts}</select>`)}
         ${fld("শিক্ষাবর্ষ (যেমনঃ ১৪৪৭-৪৮ হিজরী / ২০২৬ ইং)", `<input name="session" value="${esc(cfg.session)}">`, 2)}
         ${fld("প্রদানের তারিখ", `<input name="date" type="date" value="${todayISO()}">`)}
@@ -2789,6 +2794,47 @@ function pickExamForBulk(v){
   if(names.length === 1) return names[0];
   alert(names.length ? "উপরের \"পরীক্ষা\" ড্রপডাউন থেকে পরীক্ষার নাম নির্বাচন করুন।" : "এখনো কোনো পরীক্ষার ফলাফল এন্ট্রি করা হয়নি। আগে 'ফলাফল' ট্যাবে নম্বর এন্ট্রি করুন।");
   return "";
+}
+function resultCertBatch(type){
+  const exam = miscState.tabExamName, cls = miscState.tabClassFilter || "all";
+  if(!exam){ alert("প্রথমে পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const res = computeClassResults(exam, cls);
+  const c = certCfg();
+  const items = []; let inc = 0, fail = 0;
+  res.groups.forEach(g => {
+    inc += g.summary.incomplete; fail += g.summary.failed;
+    g.rows.forEach(row => {
+      if(type === "sanad" && row.passed) items.push({ type:"sanad", student:row.student, exam, row, session:c.session, date:todayISO() });
+      if(type === "praise" && row.passed && row.position <= 3) items.push({ type:"praise", student:row.student, exam, position:row.position, reason:"মেধা তালিকায় স্থান অর্জন", custom:"", date:todayISO() });
+    });
+  });
+  if(!items.length){
+    alert(cls !== "all" ? explainClassResult(exam, cls)
+      : (res.groups.length ? "কোনো উত্তীর্ণ ছাত্র পাওয়া যায়নি (অনুত্তীর্ণ " + bn(fail) + ", নম্বর বাকি " + bn(inc) + ")।" : "এই পরীক্ষার কোনো ফলাফল এন্ট্রি নেই।"));
+    return;
+  }
+  printCertificates(items);
+  if(type === "sanad" && (inc || fail)){
+    setTimeout(() => alert(bn(items.length) + " জনের সনদ তৈরি হয়েছে।\n\nবাদ গেছে: " + (fail ? bn(fail) + " জন অনুত্তীর্ণ" : "") + (fail && inc ? ", " : "") + (inc ? bn(inc) + " জনের নম্বর বাকি" : "") + "।"), 700);
+  }
+}
+function resultCertOne(type){
+  const exam = miscState.tabExamName;
+  const sel = document.getElementById("oneMarksheetStudent");
+  if(!sel || !sel.value){ alert("ছাত্র নির্বাচন করুন।"); return; }
+  const st = db.students.find(x => x.id === sel.value);
+  if(!st) return;
+  const res = computeClassResults(exam, st.className);
+  const g = res.groups.find(x => x.className === st.className);
+  const row = g ? g.rows.find(x => x.student.id === st.id) : null;
+  const c = certCfg();
+  if(type === "sanad"){
+    if(!row){ alert("এই ছাত্রের এই পরীক্ষার ফলাফল পাওয়া যায়নি।"); return; }
+    if(!row.passed){ alert(row.status === "incomplete" ? "এই ছাত্রের নম্বর এন্ট্রি অসম্পূর্ণ।" : "এই ছাত্র অনুত্তীর্ণ, তাই সনদ দেওয়া যাবে না।"); return; }
+    printCertificates([{ type:"sanad", student:st, exam, row, session:c.session, date:todayISO() }]);
+  } else {
+    printCertificates([{ type:"praise", student:st, exam, position: row && row.position, reason: row && row.position ? "মেধা তালিকায় স্থান অর্জন" : "অসাধারণ ফলাফল অর্জন", custom:"", date:todayISO() }]);
+  }
 }
 function certAction(kind){
   const v = boxValues("certBox");
@@ -5975,6 +6021,10 @@ document.addEventListener("click", function(e){
   if(rm){ const row = rm.closest(".fee-row"); if(row) row.remove(); return; }
   const np = e.target.closest("[data-notice-print]");
   if(np){ const n = (db.notices||[]).find(x => x.id === np.dataset.noticePrint); if(n) printNotice(n); return; }
+  if(e.target.closest('[data-action="res-sanad"]')){ resultCertBatch("sanad"); return; }
+  if(e.target.closest('[data-action="res-praise"]')){ resultCertBatch("praise"); return; }
+  if(e.target.closest('[data-action="res-sanad-one"]')){ resultCertOne("sanad"); return; }
+  if(e.target.closest('[data-action="res-praise-one"]')){ resultCertOne("praise"); return; }
   const certBtn = e.target.closest('[data-action^="cert-"]');
   if(certBtn){ certAction(certBtn.dataset.action.slice(5)); return; }
   if(e.target.closest('[data-action="print-marksheets"]')){ printMarksheets(miscState.tabExamName, miscState.tabClassFilter || "all"); return; }
