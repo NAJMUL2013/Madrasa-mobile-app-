@@ -2512,6 +2512,7 @@ function renderResultsTab(){
         <button class="btn" type="button" data-action="print-marksheets">🪪 সকল ছাত্রের মার্কশীট</button>
         <button class="btn" type="button" data-action="res-sanad">📜 উত্তীর্ণদের সনদপত্র</button>
         <button class="btn" type="button" data-action="res-praise">🏆 শীর্ষ ৩ জনের প্রশংসাপত্র</button>
+        <select data-cert-perpage style="padding:8px;border:1px solid #C9CFC0;border-radius:8px;"><option value="2" ${certCfg().perPage === 2 ? "selected" : ""}>সনদ: এক পাতায় ২টি</option><option value="1" ${certCfg().perPage === 1 ? "selected" : ""}>সনদ: এক পাতায় ১টি</option></select>
         <button class="btn ghost" type="button" data-action="print-gazette">📢 ফলাফল ঘোষণা</button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;">
@@ -2535,7 +2536,7 @@ function renderResultsTab(){
 /* ============================ সনদপত্র ও প্রশংসাপত্র ============================ */
 function certCfg(){
   const c = db.certConfig || {};
-  return { session: c.session === undefined ? "" : c.session, left: c.left || "শ্রেণি শিক্ষক", center: c.center || "নাযেমে তা'লীমাত", right: c.right || "মুহতামিম" };
+  return { session: c.session === undefined ? "" : c.session, left: c.left || "শ্রেণি শিক্ষক", center: c.center || "নাযেমে তা'লীমাত", right: c.right || "মুহতামিম", perPage: c.perPage === 1 ? 1 : 2 };
 }
 function certNo(studentId, type, exam){
   db.certLog = db.certLog || [];
@@ -2603,10 +2604,25 @@ function certPageHTML(it){
 }
 function printCertificates(items){
   if(!items.length){ alert("প্রিন্ট করার মতো কিছু পাওয়া যায়নি।"); return; }
-  const pages = items.map(certPageHTML).join("");
+  const two = certCfg().perPage === 2;
+  let pages;
+  if(two){
+    const sheets = [];
+    for(let i = 0; i < items.length; i += 2) sheets.push(items.slice(i, i + 2));
+    pages = sheets.map(pair => `<section class="sheet">${pair.map(it => `<div class="slot">${certPageHTML(it)}</div>`).join("")}</section>`).join("");
+  } else {
+    pages = items.map(certPageHTML).join("");
+  }
+  const twoCss = two ? `
+    .sheet{height:281mm;page-break-after:always;display:flex;flex-direction:column;gap:5mm;overflow:hidden;}
+    .sheet:last-child{page-break-after:auto;}
+    .slot{width:194mm;height:134.5mm;position:relative;overflow:hidden;flex-shrink:0;}
+    .slot + .slot{border-top:1px dashed #8A9A8E;}
+    .slot .cert{position:relative;width:281mm;height:194mm;margin:0;zoom:.6904;page-break-after:auto;}
+    @media screen{ .sheet{background:#fff;margin-bottom:12px;padding:0;} }` : "";
   const html = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>সনদ</title>
   <style>
-    @page{size:A4 landscape;margin:8mm;}
+    @page{size:A4 ${two ? "portrait" : "landscape"};margin:8mm;}
     *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#1F2A1C;margin:0;}
     .cert{position:relative;height:194mm;page-break-after:always;overflow:hidden;background:#fff;border:7px double #14432A;padding:8mm 14mm;}
@@ -2633,6 +2649,7 @@ function printCertificates(items){
     .sg{border-top:1.5px solid #000;padding-top:3px;min-width:54mm;text-align:center;font-size:15px;font-weight:600;}
     .seal{width:24mm;height:24mm;border:2px dashed #8AA08F;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#8AA08F;font-size:13px;}
     @media screen{ body{padding:10px;background:#eee;} .cert{margin-bottom:12px;} }
+    ${twoCss}
   </style></head><body>${pages}</body></html>`;
   openResultDoc(html);
 }
@@ -2659,6 +2676,7 @@ function renderCertsTab(){
         ${fld("শিক্ষাবর্ষ (যেমনঃ ১৪৪৭-৪৮ হিজরী / ২০২৬ ইং)", `<input name="session" value="${esc(cfg.session)}">`, 2)}
         ${fld("প্রদানের তারিখ", `<input name="date" type="date" value="${todayISO()}">`)}
         ${fld("পরীক্ষা ছাড়া হলে বিভাগ", `<select name="manualDiv"><option value="">— উল্লেখ করবেন না —</option>${Object.keys(DIVISION_LABELS).filter(k => k !== "rasib").map(k => `<option value="${k}">${DIVISION_LABELS[k]}</option>`).join("")}</select>`)}
+        ${fld("প্রিন্ট লেআউট", `<select name="perPage"><option value="2" ${cfg.perPage === 2 ? "selected" : ""}>এক পাতায় ২টি সনদ (A4, খাড়া)</option><option value="1" ${cfg.perPage === 1 ? "selected" : ""}>এক পাতায় ১টি সনদ (A4, আড়াআড়ি)</option></select>`, 2)}
         ${fld("স্বাক্ষর ১ (বাম)", `<input name="left" value="${esc(cfg.left)}">`)}
         ${fld("স্বাক্ষর ২ (মাঝ)", `<input name="center" value="${esc(cfg.center)}">`)}
         ${fld("স্বাক্ষর ৩ (ডান)", `<input name="right" value="${esc(cfg.right)}">`)}
@@ -2838,7 +2856,7 @@ function resultCertOne(type){
 }
 function certAction(kind){
   const v = boxValues("certBox");
-  db.certConfig = { session: v.session || "", left: v.left, center: v.center, right: v.right };
+  db.certConfig = { session: v.session || "", left: v.left, center: v.center, right: v.right, perPage: Number(v.perPage) === 1 ? 1 : 2 };
   saveDB();
   const stu = id => db.students.find(x => x.id === id);
   const rowFor = (st, exam) => {
@@ -6221,6 +6239,13 @@ document.addEventListener("change", function(e){
   const cur = subj.value;
   subj.innerHTML = subjectOptionsHTML("", sel.value === "all" ? "" : sel.value);
   if(cur && [...subj.options].some(o => o.value === cur)) subj.value = cur;
+});
+
+document.addEventListener("change", function(e){
+  const sel = e.target.closest("select[data-cert-perpage]");
+  if(!sel) return;
+  db.certConfig = Object.assign({}, db.certConfig || {}, { perPage: Number(sel.value) === 1 ? 1 : 2 });
+  saveDB();
 });
 </script>
 </body>
