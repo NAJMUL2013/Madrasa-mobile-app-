@@ -1,4 +1,4 @@
-const CACHE_NAME = "madrasa-app-cache-v38";
+const CACHE_NAME = "madrasa-app-cache-v44";
 const URLS_TO_CACHE = [
   "./index.html",
   "./manifest.json",
