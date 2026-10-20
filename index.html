@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>মাদরাসা ব্যবস্থাপনা সফটওয়্যার</title>
+<title>Our Madrasa</title>
 <link rel="manifest" href="manifest.json?v=16">
 <meta name="theme-color" content="#14432A">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="মাদরাসা অ্যাপ">
+<meta name="apple-mobile-web-app-title" content="Our Madrasa">
+<meta name="application-name" content="Our Madrasa">
 <link rel="apple-touch-icon" href="app-icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@500;600;700&family=Hind+Siliguri:wght@400;500;600;700&family=Aref+Ruqaa:wght@400;700&display=swap">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -183,7 +184,7 @@ function defaultDB(){
     libraryLoans:[], patronMembers:[], patronPayments:[],
     teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[],
     activityLog:[], paymentClaims:[],
-    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[], certConfig:{}, certLog:[]
+    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[], certConfig:{}, certLog:[], questionBank:[], savedPapers:[], seededPaperIds:[], committee:[], committeeInfo:{}, callCampaign:null
   };
 }
 function loadDB(){
@@ -776,6 +777,10 @@ function csvCell(v){
   return s;
 }
 function downloadCSV(filename, headers, rows){
+  const title = String(filename).replace(/\.csv$/i, "").replace(/-?\d{4}-\d{2}-\d{2}$/, "");
+  openExportChooser({ file: title, title, landscape: headers.length > 7, sections: [{ title, head: headers, rows }] });
+}
+function downloadCSVRaw(filename, headers, rows){
   const lines = [headers.map(csvCell).join(",")];
   rows.forEach(r => lines.push(r.map(csvCell).join(",")));
   // Excel-এ বাংলা সঠিকভাবে দেখানোর জন্য UTF-8 BOM যোগ করা হলো
@@ -866,8 +871,11 @@ const NAV = [
   {id:"teacherAttendance", label:"শিক্ষকদের হাজিরা", icon:"🗓️"},
   {id:"teacherSalary", label:"শিক্ষকদের বেতন", icon:"💰"},
   {id:"notices", label:"নোটিস", icon:"📢"},
+  {id:"committee", label:"কার্যকরী কমিটি", icon:"👥"},
+  {id:"voicecall", label:"কল ও ভয়েস বিজ্ঞপ্তি", icon:"📞"},
   {id:"classRoutine", label:"ক্লাস রুটিন", icon:"📅"},
   {id:"examRoutine", label:"পরীক্ষার রুটিন", icon:"📋"},
+  {id:"qpaper", label:"প্রশ্নপত্র", icon:"✍️"},
   {id:"seatPlan", label:"সিট প্ল্যান ও নম্বরপত্র", icon:"🪑"},
   {id:"books", label:"কিতাব লাইব্রেরি", icon:"📚"},
   {id:"results", label:"ফলাফল", icon:"🎓"},
@@ -1072,9 +1080,12 @@ function renderTab(tab){
   if(tab === "teacherSalary") return renderTeacherSalaryTab();
   if(BILLING_CONFIGS[tab]) return renderBillingTab(tab);
   if(tab === "notices") return renderNoticesTab();
+  if(tab === "committee") return renderCommitteeTab();
+  if(tab === "voicecall") return renderVoiceCallTab();
   if(tab === "classRoutine") return renderClassRoutineTab();
   if(tab === "examRoutine") return renderExamRoutineTab();
   if(tab === "seatPlan") return renderSeatPlanTab();
+  if(tab === "qpaper") return renderQuestionPaperTab();
   if(tab === "certs") return renderCertsTab();
   if(tab === "books") return renderBooksTab();
   if(tab === "results") return renderResultsTab();
@@ -1612,6 +1623,7 @@ function renderClassRoutineTab(){
           </select>
         </div>
         <button class="btn small" data-action="print-class-routine">🖨 এই রুটিন প্রিন্ট করুন</button>
+        <button class="btn ghost small" data-action="export-class-routine">📤 Excel/Word</button>
       </div>
       <div class="tbl-body" style="overflow-x:auto;">
         <style>.rt-prev table.rt{border-collapse:collapse;min-width:620px;width:100%;} .rt-prev .rt th,.rt-prev .rt td{border:1.5px solid #333;padding:6px 4px;text-align:center;font-size:13px;} .rt-prev .rt th{background:#EEF2E8;} .rt-prev .rt td small{display:block;font-size:10.5px;color:#555;}</style>
@@ -1694,6 +1706,7 @@ function renderExamRoutineTab(){
           <select data-misc-field="examGridName">${examNames.length ? examNames.map(n=>`<option ${n===gridName?"selected":""}>${esc(n)}</option>`).join("") : `<option value="">— কোনো পরীক্ষা নেই —</option>`}</select>
         </div>
         <button class="btn small" data-action="print-exam-routine" data-exam="${esc(gridName)}">🖨 ছক আকারে প্রিন্ট</button>
+        <button class="btn ghost small" data-action="export-exam-routine" data-exam="${esc(gridName)}">📤 Excel/Word</button>
       </div>
       <div class="tbl-body" style="overflow-x:auto;">
         <style>.rt-prev table.rt{border-collapse:collapse;min-width:620px;width:100%;} .rt-prev .rt th,.rt-prev .rt td{border:1.5px solid #333;padding:6px 4px;text-align:center;font-size:13px;} .rt-prev .rt th{background:#EEF2E8;} .rt-prev .sym{font-size:20px;}</style>
@@ -1730,6 +1743,7 @@ function renderExamRoutineTab(){
 
 /* ============================ নোটিস ============================ */
 const NOTICE_TEMPLATES = {
+  "কার্যকরী কমিটির সভা": "এতদ্বারা কার্যকরী কমিটির সকল সম্মানিত সদস্যকে জানানো যাচ্ছে যে, মাদরাসার ........ সভা আগামী ........ ইং তারিখ ........ বার ........ ঘটিকায় ........ এ অনুষ্ঠিত হবে, ইনশাআল্লাহ।\nআলোচ্যসূচি:\n১. পূর্ববর্তী সভার কার্যবিবরণী পাঠ ও অনুমোদন\n২. মাদরাসার আয়-ব্যয়ের হিসাব পর্যালোচনা\n৩. ........\n৪. বিবিধ\nসভায় সকল সদস্যকে যথাসময়ে উপস্থিত থাকার জন্য বিনীত অনুরোধ করা যাচ্ছে।",
   "পরীক্ষার নোটিস": "এতদ্বারা মাদরাসার সকল ছাত্রদের অবগতির জন্য জানানো যাচ্ছে যে, আগামী ........ ইং রোজ ........ হতে ........ ইং রোজ ........ পর্যন্ত ........ পরীক্ষা চলবে, ইনশাআল্লাহ।\nঅতএব আগামী ........ ইং রোজ ........ এর মধ্যে পরীক্ষার নির্ধারিত ফি এবং চলতি মাসের বেতন সহ বকেয়া বেতন জমা দিতে এবং পরীক্ষার পূর্ণ প্রস্তুতি নিতে আদেশ করা হইল।",
   "ছুটির নোটিস": "এতদ্বারা মাদরাসার সকল ছাত্র ও অভিভাবকদের অবগতির জন্য জানানো যাচ্ছে যে, আগামী ........ ইং রোজ ........ হতে ........ ইং রোজ ........ পর্যন্ত মাদরাসা বন্ধ থাকবে। ছুটির পর ........ ইং রোজ ........ মাদরাসা পুনরায় খুলবে, ইনশাআল্লাহ।\nসকল ছাত্রকে যথাসময়ে মাদরাসায় উপস্থিত হওয়ার জন্য আদেশ করা হইল।",
   "বেতন আদায়ের নোটিস": "এতদ্বারা মাদরাসার সকল ছাত্র ও অভিভাবকদের জানানো যাচ্ছে যে, আগামী ........ ইং তারিখের মধ্যে চলতি মাসের বেতন ও বকেয়া বেতন পরিশোধ করার জন্য আদেশ করা হইল। অন্যথায় পরবর্তী ব্যবস্থা গ্রহণ করা হবে।",
@@ -1748,10 +1762,19 @@ function noticeListHTML(){
     const snip = (n.subject || n.body || "").replace(/\s+/g, " ").slice(0, 60);
     return `<tr><td>${fmtDate(n.date)}</td><td>${esc(snip)}${(n.subject||n.body||"").length>60?"…":""}</td>
       <td style="text-align:center;white-space:nowrap;"><button class="del-btn" data-notice-print="${n.id}" title="প্রিন্ট">🖨</button>
+      <button class="del-btn" data-notice-word="${n.id}" title="Word ফাইল">📝</button>
       <button class="del-btn" data-delete="notices" data-id="${n.id}">🗑</button></td></tr>`;
   }).join("")}</tbody></table>`;
 }
 function renderNoticesTab(){
+  if(miscState.noticePreset === "committee"){
+    miscState.noticePreset = "";
+    setTimeout(() => {
+      const sel = document.querySelector("[data-notice-template]");
+      if(sel){ sel.value = "কার্যকরী কমিটির সভা"; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+      const ck = document.querySelector('input[name="attachCommittee"]'); if(ck) ck.checked = true;
+    }, 0);
+  }
   return `
     <div class="sec-head"><div class="badge">📢</div><div><h2>নোটিস</h2><p>মাদরাসার লেটারহেডে নোটিস তৈরি ও প্রিন্ট করুন</p></div></div>
     <div class="arch form-card">
@@ -1774,6 +1797,7 @@ function renderNoticesTab(){
             <option>সেক্রেটারি, অত্র মাদরাসা</option><option>সভাপতি, পরিচালনা কমিটি</option><option>অধ্যক্ষ, অত্র মাদরাসা</option>
           </select></label>
         <label class="field" style="grid-column:span 2;flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" name="order" checked> <span>"আদেশক্রমে" লিখুন</span></label>
+        <label class="field" style="grid-column:span 2;flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" name="attachCommittee"> <span>কার্যকরী কমিটির সদস্যদের তালিকা (বিতরণ) নোটিসের নিচে যুক্ত করুন</span></label>
         <div class="btn-end" style="grid-column:span 2;"><button class="btn" type="submit">💾 সংরক্ষণ করে প্রিন্ট করুন</button></div>
       </form>
     </div>
@@ -1813,6 +1837,7 @@ function printNotice(n){
     .fee th{font-size:18px;}
     .sign{text-align:center;font-size:17px;line-height:1.8;margin-left:auto;padding-bottom:4px;}
     .sign .sp{height:60px;}
+    .dist{margin-top:16px;font-size:15px;} .dl{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;margin-top:4px;line-height:1.6;}
     @media screen{ body{padding:12px;} .page{background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.2);padding:14mm;} }
   </style></head><body>
     <div class="page"><div class="wm"><img src="${logo}" alt=""></div>
@@ -1827,6 +1852,7 @@ function printNotice(n){
       <div class="ref">সূত্র${n.ref?` : ${esc(n.ref)}`:""}</div>
       ${n.subject ? `<div class="subj">বিষয় : ${esc(n.subject)}</div>` : ""}
       ${paras}
+      ${(n.attachCommittee && (db.committee || []).length) ? `<div class="dist"><b>সদস্যবৃন্দ (বিতরণ):</b><div class="dl">${committeeSorted().map((m, i) => `<span>${bn(i + 1)}. ${esc(m.name)} — ${esc(m.post)}</span>`).join("")}</div></div>` : ""}
       <div class="bottom">
         <div>${feeBox}</div>
         <div class="sign">${n.order !== false ? "আদেশক্রমে" : ""}<div class="sp"></div>${n.signerName ? `<b>${esc(n.signerName)}</b><br>` : ""}${esc(n.signerTitle || "")}</div>
@@ -2037,6 +2063,7 @@ function renderSeatPlanTab(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
         <button class="btn" type="button" data-action="print-seat-plan">🖨 সিট প্ল্যান প্রিন্ট</button>
         <button class="btn ghost" type="button" data-action="save-seat-numbers">💾 সিট নং ছাত্রদের তথ্যে সংরক্ষণ</button>
+        <button class="btn ghost" type="button" data-action="export-seat-list">📤 তালিকা (Excel/Word)</button>
       </div>
       <p style="font-size:12px;color:#5B6357;margin:8px 0 0;">ছাত্র সংখ্যা এক কক্ষের আসনের চেয়ে বেশি হলে নিজে থেকে পরের কক্ষের পাতা তৈরি হবে। সংরক্ষণ করলে প্রবেশপত্রে সিট নং আসবে।</p>
     </div>
@@ -2052,7 +2079,8 @@ function renderSeatPlanTab(){
         <label class="field"><span>ফাঁকা সারির সংখ্যা</span><input name="rows" type="number" min="1" max="150" value="30"></label>
         ${chk("names","ছাত্রের নামসহ (টিক তুললে শ্রেণির ছাত্রদের নাম বসবে; না তুললে সম্পূর্ণ ফাঁকা)",false)}
       </div>
-      <div style="margin-top:10px;"><button class="btn" type="button" data-action="print-marks-sheet">🖨 নম্বরপত্র প্রিন্ট</button></div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="print-marks-sheet">🖨 নম্বরপত্র প্রিন্ট</button>
+      <button class="btn ghost" type="button" data-action="export-marks-sheet" style="margin-left:6px;">📤 Excel/Word</button></div>
     </div>`;
 }
 
@@ -2514,6 +2542,8 @@ function renderResultsTab(){
         <button class="btn" type="button" data-action="res-praise">🏆 শীর্ষ ৩ জনের প্রশংসাপত্র</button>
         <select data-cert-perpage style="padding:8px;border:1px solid #C9CFC0;border-radius:8px;"><option value="2" ${certCfg().perPage === 2 ? "selected" : ""}>সনদ: এক পাতায় ২টি</option><option value="1" ${certCfg().perPage === 1 ? "selected" : ""}>সনদ: এক পাতায় ১টি</option></select>
         <button class="btn ghost" type="button" data-action="print-gazette">📢 ফলাফল ঘোষণা</button>
+        <button class="btn ghost" type="button" data-action="export-result-sheet">📤 ফলাফল শীট (Excel/Word)</button>
+        <button class="btn ghost" type="button" data-action="export-merit">📤 মেধা তালিকা (Excel/Word)</button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;">
         <label class="field" style="flex:1;min-width:180px;"><span>একজনের মার্কশীট</span><select id="oneMarksheetStudent"><option value="">ছাত্র নির্বাচন করুন</option>${studentOptions}</select></label>
@@ -2905,6 +2935,921 @@ function certAction(kind){
     if(!v.exam){ alert("পরীক্ষা নির্বাচন করুন।"); return; }
     printMarksheets(v.exam, v.cls);
   }
+}
+
+/* ============================ প্রশ্নপত্র (শ্রেণি ও কিতাব ভিত্তিক) ============================ */
+const QTYPES = {
+  mcq:       { bn:"বহুনির্বাচনী প্রশ্ন",           ar:"الأسئلة الموضوعية",        hbn:"সঠিক উত্তরটি বাছাই করো",              har:"اختر الإجابة الصحيحة", lines:0 },
+  fill:      { bn:"শূন্যস্থান পূরণ",               ar:"أكمل الفراغات",             hbn:"শূন্যস্থান পূরণ করো",                 har:"أكمل الفراغات التالية", lines:0 },
+  tf:        { bn:"সত্য/মিথ্যা নির্ণয়",           ar:"صح أم خطأ",                 hbn:"সঠিক হলে \"সত্য\", ভুল হলে \"মিথ্যা\" লেখো", har:"ضع علامة (✓) أو (✗)", lines:0 },
+  short:     { bn:"সংক্ষিপ্ত প্রশ্ন",              ar:"الأسئلة القصيرة",           hbn:"সংক্ষেপে উত্তর দাও",                  har:"أجب عن الأسئلة التالية بإيجاز", lines:2 },
+  long:      { bn:"বিস্তারিত/রচনামূলক প্রশ্ন",     ar:"الأسئلة المقالية",          hbn:"বিস্তারিত উত্তর দাও",                  har:"أجب عن الأسئلة التالية بالتفصيل", lines:6 },
+  translate: { bn:"অনুবাদ",                         ar:"الترجمة",                   hbn:"অনুবাদ করো",                           har:"ترجم ما يلي", lines:3 },
+  grammar:   { bn:"নাহু-সরফ (তারকীব/ইরাব/ছীগাহ)",   ar:"النحو والصرف",              hbn:"তারকীব, ইরাব ও ছীগাহ নির্ণয় করো",       har:"أعرب وحلل الصيغ التالية", lines:3 }
+};
+const QTYPE_ORDER = ["mcq","fill","tf","short","long","translate","grammar"];
+const BN_LETTERS = ["ক","খ","গ","ঘ","ঙ","চ","ছ","জ"];
+const AR_LETTERS = ["أ","ب","ج","د","هـ","و","ز","ح"];
+
+function qpBankFor(v){
+  const sub = v.subject && v.subject !== "__new__" ? v.subject : "";
+  return (db.questionBank || []).filter(q => (v.allcls ? true : q.className === v.cls) && (!sub || q.subject === sub));
+}
+function renderQuestionPaperTab(){
+  const cnt = c => db.students.filter(s => s.className === c).length;
+  const firstWith = allClassNames().find(c => cnt(c) > 0) || allClassNames()[0];
+  const cOpts = allClassNames().map(c => `<option value="${esc(c)}" ${c === firstWith ? "selected" : ""}>${esc(c)}</option>`).join("") + `<option value="__new__">➕ নতুন শ্রেণি যোগ করুন…</option>`;
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  setTimeout(renderQpBank, 0);
+  return `
+    <div class="sec-head"><div class="badge">✍️</div><div><h2>প্রশ্নপত্র</h2><p>শ্রেণি ও কিতাব বেছে প্রশ্ন ব্যাংক থেকে সহজে প্রশ্নপত্র বানান ও প্রিন্ট করুন</p></div></div>
+    ${renderPaperLibrary()}
+    <div class="arch form-card" id="qpBox" style="margin-top:8px;">
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);">
+        ${fld("শ্রেণি", `<select name="cls" data-addable="class">${cOpts}</select>`)}
+        ${fld("কিতাব/বিষয় (শ্রেণি অনুযায়ী তালিকা)", `<select name="subject" data-addable="subject">${subjectOptionsHTML("", firstWith)}</select>`)}
+        ${fld("পরীক্ষার নাম", `<select name="exam" data-addable="exam"><option value="">— ফাঁকা রাখুন —</option>${examNameOptionsHTML("")}</select>`, 2)}
+        ${fld("পূর্ণমান", `<input name="full" type="number" min="1" value="100">`)}
+        ${fld("সময়", `<input name="time" placeholder="যেমনঃ ৩ ঘণ্টা">`)}
+        ${fld("তারিখ", `<input name="date" type="date">`)}
+        ${fld("ভাষা/দিক", `<select name="dir"><option value="ltr">বাংলা (বাম থেকে ডানে)</option><option value="rtl">আরবি (ডান থেকে বামে)</option></select>`)}
+        ${fld("নির্দেশনা", `<input name="instr" value="সকল প্রশ্নের উত্তর দিতে হবে। ডান পাশের সংখ্যা প্রশ্নের মান নির্দেশ করে।">`, 2)}
+        <label class="field" style="flex-direction:row;align-items:center;gap:8px;grid-column:span 2;"><input type="checkbox" name="ans"> <span>প্রতি প্রশ্নের নিচে উত্তর লেখার জায়গা (ডটেড লাইন) রাখুন</span></label>
+        <label class="field" style="flex-direction:row;align-items:center;gap:8px;grid-column:span 2;"><input type="checkbox" name="allcls"> <span>এই কিতাবের অন্য শ্রেণির প্রশ্নও ব্যাংকে দেখান</span></label>
+      </div>
+    </div>
+
+    <div class="arch form-card" id="qpAddBox" style="margin-top:8px;">
+      <strong>➕ প্রশ্ন ব্যাংকে নতুন প্রশ্ন যোগ করুন</strong>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        ${fld("প্রশ্নের ধরন", `<select name="type">${QTYPE_ORDER.map(k => `<option value="${k}">${QTYPES[k].bn}</option>`).join("")}</select>`)}
+        ${fld("প্রতি প্রশ্নের মান", `<input name="marks" type="number" min="0" step="any" value="1">`)}
+        ${fld("প্রশ্ন (প্রতি লাইনে একটি প্রশ্ন; বহুনির্বাচনীতে প্রশ্ন + পরের ৪ লাইনে ক-ঘ অপশন, দুই প্রশ্নের মাঝে ফাঁকা লাইন)", `<textarea name="text" rows="6" style="width:100%;font-family:inherit;font-size:15px;padding:8px;border:1px solid #C9CFC0;border-radius:8px;"></textarea>`, 2)}
+      </div>
+      <div style="margin-top:8px;"><button class="btn" type="button" data-action="qp-add">➕ যোগ করুন</button></div>
+    </div>
+
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <strong>📚 প্রশ্ন ব্যাংক</strong>
+        <div style="display:flex;gap:6px;"><button class="btn ghost small" type="button" data-action="qp-all">সব বাছুন</button><button class="btn ghost small" type="button" data-action="qp-none">বাতিল</button></div>
+      </div>
+      <div id="qpSummary" style="padding:6px 12px;font-size:13px;"></div>
+      <div id="qpBank" style="padding:6px 10px;max-height:60vh;overflow:auto;"></div>
+    </div>
+    <div style="margin-top:10px;"><button class="btn" type="button" data-action="qp-print">🖨 প্রশ্নপত্র প্রিন্ট করুন</button>
+    <button class="btn ghost" type="button" data-action="qp-word">📝 Word ফাইল (সম্পাদনার জন্য)</button></div>`;
+}
+function renderQpBank(){
+  const holder = document.getElementById("qpBank");
+  if(!holder) return;
+  const v = boxValues("qpBox");
+  const sel = miscState.qpSelected = miscState.qpSelected || {};
+  const list = qpBankFor(v);
+  const live = new Set((db.questionBank || []).map(q => q.id));
+  Object.keys(sel).forEach(id => { if(!live.has(id)) delete sel[id]; });
+  if(!list.length){
+    holder.innerHTML = `<div class="empty">এই শ্রেণি${v.subject ? " ও কিতাব" : ""}র জন্য এখনো কোনো প্রশ্ন নেই। উপরের ফর্ম থেকে প্রশ্ন যোগ করুন।</div>`;
+    updateQpSummary(); return;
+  }
+  holder.innerHTML = QTYPE_ORDER.map(t => {
+    const items = list.filter(q => q.type === t);
+    if(!items.length) return "";
+    return `<div style="font-weight:700;margin:10px 0 4px;color:#14432A;">${QTYPES[t].bn} (${bn(items.length)}টি)</div>` + items.map(q => `
+      <div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed #D7DDCB;">
+        <input type="checkbox" data-qp-pick="${q.id}" ${sel[q.id] ? "checked" : ""} style="margin-top:4px;">
+        <div style="flex:1;font-size:14px;line-height:1.6;">${esc(q.text)}${q.options && q.options.length ? `<div style="font-size:12.5px;color:#5B6357;">${q.options.map((o, i) => (BN_LETTERS[i] || "") + ") " + esc(o)).join(" &nbsp; ")}</div>` : ""}
+          ${v.allcls && q.className !== v.cls ? `<div style="font-size:11px;color:#8A7A5A;">${esc(q.className)} • ${esc(q.subject)}</div>` : ""}</div>
+        <input type="number" min="0" step="any" data-qp-marks="${q.id}" value="${esc(q.marks)}" title="নম্বর" style="width:52px;padding:4px;border:1px solid #C9CFC0;border-radius:6px;text-align:center;">
+        <button class="del-btn" data-delete="questionBank" data-id="${q.id}" title="মুছুন">🗑</button>
+      </div>`).join("");
+  }).join("");
+  updateQpSummary();
+}
+function selectedQuestions(){
+  const sel = miscState.qpSelected || {};
+  return (db.questionBank || []).filter(q => sel[q.id]);
+}
+function updateQpSummary(){
+  const box = document.getElementById("qpSummary");
+  if(!box) return;
+  const qs = selectedQuestions();
+  const total = qs.reduce((a, q) => a + (Number(q.marks) || 0), 0);
+  const full = Number((boxValues("qpBox") || {}).full) || 0;
+  const ok = !full || total === full;
+  box.innerHTML = `নির্বাচিত: <b>${bn(qs.length)}</b>টি প্রশ্ন • মোট নম্বর: <b style="color:${ok ? "#14432A" : "#B3261E"}">${bn(Math.round(total * 100) / 100)}</b>${full ? ` / পূর্ণমান ${bn(full)}` : ""}${ok ? "" : " ⚠️ পূর্ণমানের সাথে মিলছে না"}`;
+}
+function parseQuestionInput(type, text){
+  const out = [];
+  if(type === "mcq"){
+    text.split(/\n\s*\n/).forEach(block => {
+      const lines = block.split("\n").map(x => x.trim()).filter(Boolean);
+      if(!lines.length) return;
+      out.push({ text: lines[0], options: lines.slice(1, 5) });
+    });
+  } else {
+    text.split("\n").map(x => x.trim()).filter(Boolean).forEach(l => out.push({ text: l, options: [] }));
+  }
+  return out;
+}
+function qpAdd(){
+  const base = boxValues("qpBox"), add = boxValues("qpAddBox");
+  if(!base.cls || base.cls === "__new__"){ alert("শ্রেণি নির্বাচন করুন।"); return; }
+  if(!base.subject || base.subject === "__new__"){ alert("কিতাব/বিষয় নির্বাচন করুন — প্রশ্ন কিতাব অনুযায়ী জমা থাকে।"); return; }
+  const parsed = parseQuestionInput(add.type, add.text || "");
+  if(!parsed.length){ alert("প্রশ্ন লিখুন।"); return; }
+  db.questionBank = db.questionBank || [];
+  miscState.qpSelected = miscState.qpSelected || {};
+  parsed.forEach(p => {
+    const rec = { id: uid(), className: base.cls, subject: base.subject, type: add.type, text: p.text, options: p.options, marks: Number(add.marks) || 0 };
+    db.questionBank.push(rec);
+    miscState.qpSelected[rec.id] = true;
+  });
+  saveDB();
+  const ta = document.querySelector('#qpAddBox [name="text"]'); if(ta) ta.value = "";
+  renderQpBank();
+}
+function questionPaperHTML(){
+  const v = boxValues("qpBox");
+  const qs = selectedQuestions();
+  if(!qs.length){ alert("প্রশ্ন ব্যাংক থেকে অন্তত একটি প্রশ্ন বাছুন।"); return; }
+  const rtl = v.dir === "rtl";
+  const total = qs.reduce((a, q) => a + (Number(q.marks) || 0), 0);
+  const subj = v.subject && v.subject !== "__new__" ? v.subject : "";
+  const exam = v.exam && v.exam !== "__new__" ? v.exam : "";
+  const letters = rtl ? AR_LETTERS : BN_LETTERS;
+  let n = 0, secIdx = 0;
+  const secs = QTYPE_ORDER.map(t => {
+    const items = qs.filter(q => q.type === t);
+    if(!items.length) return "";
+    const T = QTYPES[t];
+    const secTotal = items.reduce((a, q) => a + (Number(q.marks) || 0), 0);
+    const title = `${letters[secIdx++] || ""}. ${rtl ? T.ar : T.bn} <span class="hint">— ${rtl ? T.har : T.hbn}</span>`;
+    const rows = items.map(q => {
+      n++;
+      const opts = q.options && q.options.length ? `<div class="opts">${q.options.map((o, i) => `<span>${(rtl ? AR_LETTERS : BN_LETTERS)[i] || ""}) ${esc(o)}</span>`).join("")}</div>` : "";
+      const lines = v.ans ? Array.from({ length: T.lines }, () => `<div class="al"></div>`).join("") : "";
+      return `<div class="q"><div class="n">${bn(n)}.</div><div class="t">${esc(q.text)}${opts}${lines}</div><div class="m">[${bn(q.marks)}]</div></div>`;
+    }).join("");
+    return `<div class="sec"><div class="st"><span>${title}</span><span class="sm">(${bn(Math.round(secTotal * 100) / 100)} নম্বর)</span></div>${rows}</div>`;
+  }).join("");
+  const dash = t => t ? `<b>${esc(t)}</b>` : `<span class="dots"></span>`;
+  const html = `<!DOCTYPE html><html lang="${rtl ? "ar" : "bn"}" dir="${rtl ? "rtl" : "ltr"}"><head><meta charset="UTF-8"><title>প্রশ্নপত্র</title>
+  <style>
+    @page{size:A4 portrait;margin:10mm 12mm;}
+    ${FANCY_HEADER_CSS}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Aref Ruqaa','Amiri','Nirmala UI',Arial,sans-serif;color:#000;margin:0;font-size:15px;}
+    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 14px;font-size:14px;margin:6px 0 8px;border:1.5px solid #14432A;border-radius:8px;padding:6px 10px;}
+    .meta div{display:flex;gap:5px;align-items:flex-end;} .meta .dots{display:inline-block;min-width:24mm;border-bottom:1px dotted #000;height:15px;}
+    .instr{font-size:13px;margin:6px 0 10px;padding:4px 8px;background:#FBF3D5;border-radius:6px;}
+    .sec{margin-bottom:12px;} .st{display:flex;justify-content:space-between;font-weight:800;font-size:16px;border-bottom:2px solid #14432A;padding-bottom:2px;margin-bottom:6px;color:#14432A;}
+    .st .hint{font-weight:500;font-size:13px;color:#333;} .st .sm{font-size:13px;white-space:nowrap;}
+    .q{display:flex;gap:8px;margin:7px 0;page-break-inside:avoid;line-height:1.7;} .q .n{min-width:24px;font-weight:700;} .q .t{flex:1;} .q .m{min-width:30px;text-align:${rtl ? "left" : "right"};font-weight:700;}
+    .opts{display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;margin-top:3px;font-size:14px;}
+    .al{border-bottom:1px dotted #555;height:24px;}
+    .end{text-align:center;margin-top:14px;font-weight:700;letter-spacing:2px;}
+    @media screen{ body{padding:12px;} }
+  </style></head><body>
+    ${fancyHeaderHTML({ title: "প্রশ্নপত্র" + (exam ? " — " + exam : ""), compact: true })}
+    <div class="meta">
+      <div>শ্রেণি: ${dash(v.cls && v.cls !== "__new__" ? v.cls : "")}</div><div>কিতাব/বিষয়: ${dash(subj)}</div><div>তারিখ: ${dash(v.date ? fmtDate(v.date) : "")}</div>
+      <div>পূর্ণমান: ${dash(bn(Number(v.full) || Math.round(total * 100) / 100))}</div><div>সময়: ${dash(v.time)}</div><div>নাম/রোল: <span class="dots"></span></div>
+    </div>
+    ${v.instr ? `<div class="instr">${esc(v.instr)}</div>` : ""}
+    ${secs}
+    <div class="end">— সমাপ্ত —</div>
+  </body></html>`;
+  return html;
+}
+function printQuestionPaper(){ const h = questionPaperHTML(); if(h) openResultDoc(h); }
+
+/* ============================ Excel (.xlsx) ও Word (.docx) এক্সপোর্ট — ইন্টারনেট ছাড়াই ============================ */
+const CRC_TABLE = (() => { const t = []; for(let n = 0; n < 256; n++){ let c = n; for(let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } return t; })();
+function crc32(bytes){ let c = 0xFFFFFFFF; for(let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files, mime){
+  const enc = new TextEncoder(); const parts = [], central = []; let offset = 0;
+  files.forEach(f => {
+    const nameB = enc.encode(f.name); const data = typeof f.data === "string" ? enc.encode(f.data) : f.data; const crc = crc32(data);
+    const l = new DataView(new ArrayBuffer(30));
+    l.setUint32(0, 0x04034b50, true); l.setUint16(4, 20, true); l.setUint16(6, 0x0800, true); l.setUint16(8, 0, true); l.setUint16(10, 0, true); l.setUint16(12, 0x21, true);
+    l.setUint32(14, crc, true); l.setUint32(18, data.length, true); l.setUint32(22, data.length, true); l.setUint16(26, nameB.length, true); l.setUint16(28, 0, true);
+    parts.push(new Uint8Array(l.buffer), nameB, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true); c.setUint16(12, 0, true); c.setUint16(14, 0x21, true);
+    c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, nameB.length, true); c.setUint32(42, offset, true);
+    central.push(new Uint8Array(c.buffer), nameB);
+    offset += 30 + nameB.length + data.length;
+  });
+  const cdSize = central.reduce((a, b) => a + b.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, cdSize, true); e.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: mime || "application/zip" });
+}
+function xmlEsc(s){ return String(s == null ? "" : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function cellText(v){
+  if(v == null) return "";
+  return String(v).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").trim();
+}
+const BN2EN = s => String(s).replace(/[০-৯]/g, d => String("০১২৩৪৫৬৭৮৯".indexOf(d)));
+function cellValue(v, label){
+  if(typeof v === "number" && isFinite(v)) return v;
+  const t = cellText(v);
+  if(/মোবাইল|ফোন|আইডি|নং|ক্রম|সিট|রোল/.test(label || "")) return t;
+  const m = t.match(/^[৳\s]*([০-৯0-9][০-৯0-9,]*(?:\.[০-৯0-9]+)?)$/);
+  if(m){
+    const raw = BN2EN(m[1]).replace(/,/g, "");
+    if(/^0\d/.test(raw) || raw.length > 12) return t;
+    return Number(raw);
+  }
+  return t;
+}
+function colLetter(i){ let s = ""; i++; while(i > 0){ const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+function letterheadLines(){ return { ar: getBrandArabic(), bn: getBrandTitle(), sub: getBrandSub() }; }
+
+function buildXlsx(spec){
+  const lh = letterheadLines();
+  const usedNames = {};
+  const sheetXml = [];
+  const sheetNames = [];
+  spec.sections.forEach((sec, si) => {
+    let nm = (sec.title || spec.title || "Sheet" + (si + 1)).replace(/[\\\/?*\[\]:]/g, " ").trim().slice(0, 28) || "Sheet" + (si + 1);
+    let base = nm, k = 2; while(usedNames[nm.toLowerCase()]){ nm = base.slice(0, 26) + " " + k++; }
+    usedNames[nm.toLowerCase()] = 1; sheetNames.push(nm);
+    const head = sec.head.map(h => cellText(h));
+    const ncol = head.length;
+    const rows = [];
+    const merges = [];
+    const addTitle = (text, style, ht) => { rows.push({ cells: [{ t: text, s: style }], ht }); merges.push("A" + rows.length + ":" + colLetter(Math.max(ncol - 1, 0)) + rows.length); };
+    addTitle(lh.bn, 1, 26);
+    addTitle((spec.title || "") + (sec.title && sec.title !== spec.title ? " — " + sec.title : ""), 6, 22);
+    addTitle("তারিখ: " + fmtDate(todayISO()), 7, 16);
+    (sec.notes || []).forEach(n => addTitle(n, 7, 16));
+    rows.push({ cells: [], ht: 8 });
+    const headerRow = rows.length + 1;
+    rows.push({ cells: head.map(h => ({ t: h, s: 2 })), ht: 30 });
+    const widths = head.map(h => Math.min(40, Math.max(8, h.length * 1.6 + 2)));
+    sec.rows.forEach(r => {
+      const cells = r.map((v, ci) => {
+        const val = cellValue(v, head[ci]);
+        const len = String(typeof val === "number" ? val : val).length;
+        widths[ci] = Math.min(46, Math.max(widths[ci] || 8, len * 1.35 + 2));
+        return typeof val === "number" ? { n: val, s: 4 } : { t: val, s: 3 };
+      });
+      rows.push({ cells });
+    });
+    if(sec.totals){
+      rows.push({ cells: sec.totals.map(v => { const val = cellValue(v, ""); return typeof val === "number" ? { n: val, s: 5 } : { t: val, s: 5 }; }) });
+    }
+    const xmlRows = rows.map((r, ri) => {
+      const rn = ri + 1;
+      const cs = r.cells.map((c, ci) => {
+        const ref = colLetter(ci) + rn;
+        if(c.n !== undefined) return `<c r="${ref}" s="${c.s}"><v>${c.n}</v></c>`;
+        return `<c r="${ref}" s="${c.s}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(c.t)}</t></is></c>`;
+      }).join("");
+      return `<row r="${rn}"${r.ht ? ` ht="${r.ht}" customHeight="1"` : ""}>${cs}</row>`;
+    }).join("");
+    const cols = widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${Math.round(w * 10) / 10}" customWidth="1"/>`).join("");
+    sheetXml.push(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"${si === 0 ? ' tabSelected="1"' : ""}><pane ySplit="${headerRow}" topLeftCell="A${headerRow + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${cols}</cols><sheetData>${xmlRows}</sheetData><mergeCells count="${merges.length}">${merges.map(m => `<mergeCell ref="${m}"/>`).join("")}</mergeCells><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="${ncol > 7 ? "landscape" : "portrait"}" fitToHeight="0"/></worksheet>`);
+  });
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="5">
+<font><sz val="11"/><name val="Nirmala UI"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Nirmala UI"/></font>
+<font><b/><sz val="16"/><color rgb="FF14432A"/><name val="Nirmala UI"/></font>
+<font><b/><sz val="11"/><name val="Nirmala UI"/></font>
+<font><b/><sz val="13"/><color rgb="FF14432A"/><name val="Nirmala UI"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF14432A"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFBF3D5"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color rgb="FF777777"/></left><right style="thin"><color rgb="FF777777"/></right><top style="thin"><color rgb="FF777777"/></top><bottom style="thin"><color rgb="FF777777"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="8">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const n = sheetNames.length;
+  const files = [
+    { name: "[Content_Types].xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheetNames.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>` },
+    { name: "_rels/.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: "xl/workbook.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheetNames.map((nm, i) => `<sheet name="${xmlEsc(nm)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheetNames.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: "xl/styles.xml", data: styles }
+  ];
+  sheetXml.forEach((x, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: x }));
+  return makeZip(files, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
+
+/* ---------- Word ---------- */
+function docRun(text, o){
+  o = o || {};
+  const rpr = `${o.b ? "<w:b/><w:bCs/>" : ""}${o.u ? '<w:u w:val="single"/>' : ""}${o.color ? `<w:color w:val="${o.color}"/>` : ""}${o.sz ? `<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>` : ""}${o.rtl ? "<w:rtl/>" : ""}`;
+  const parts = String(text == null ? "" : text).split("\n");
+  return `<w:r>${rpr ? `<w:rPr>${rpr}</w:rPr>` : ""}${parts.map((p, i) => (i ? "<w:br/>" : "") + `<w:t xml:space="preserve">${xmlEsc(p)}</w:t>`).join("")}</w:r>`;
+}
+function docPara(text, o){
+  o = o || {};
+  const ppr = `${o.rtl ? "<w:bidi/>" : ""}${o.border ? `<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="14432A"/></w:pBdr>` : ""}<w:spacing w:before="${o.before || 0}" w:after="${o.after == null ? 80 : o.after}"/>${o.ind ? `<w:ind w:firstLine="${o.ind}"/>` : ""}<w:jc w:val="${o.align || "left"}"/>`;
+  return `<w:p><w:pPr>${ppr}</w:pPr>${o.runs ? o.runs : docRun(text, o)}</w:p>`;
+}
+function docTable(head, rows, o){
+  o = o || {};
+  const n = head.length;
+  const sz = o.sz || (n > 8 ? 16 : n > 6 ? 18 : 20);
+  const bd = `<w:top w:val="single" w:sz="4" w:color="555555"/><w:left w:val="single" w:sz="4" w:color="555555"/><w:bottom w:val="single" w:sz="4" w:color="555555"/><w:right w:val="single" w:sz="4" w:color="555555"/><w:insideH w:val="single" w:sz="4" w:color="555555"/><w:insideV w:val="single" w:sz="4" w:color="555555"/>`;
+  const cell = (t, st) => `<w:tc><w:tcPr><w:vAlign w:val="center"/>${st.fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${st.fill}"/>` : ""}</w:tcPr><w:p><w:pPr>${o.rtl ? "<w:bidi/>" : ""}<w:spacing w:before="40" w:after="40"/><w:jc w:val="${st.align || "left"}"/></w:pPr>${docRun(t, { b: st.b, color: st.color, sz, rtl: o.rtl })}</w:p></w:tc>`;
+  const hdr = `<w:tr><w:trPr><w:tblHeader/></w:trPr>${head.map(h => cell(cellText(h), { fill: "14432A", color: "FFFFFF", b: true, align: "center" })).join("")}</w:tr>`;
+  const body = rows.map(r => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${r.map((v, i) => { const t = cellText(v); const isNum = typeof cellValue(v, cellText(head[i])) === "number"; return cell(t, { align: isNum ? "right" : "left" }); }).join("")}</w:tr>`).join("");
+  const tot = o.totals ? `<w:tr>${o.totals.map(v => cell(cellText(v), { fill: "FBF3D5", b: true })).join("")}</w:tr>` : "";
+  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>${o.rtl ? "<w:bidiVisual/>" : ""}<w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="autofit"/><w:tblCellMar><w:left w:w="70" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${head.map(() => `<w:gridCol w:w="${Math.floor(9000 / n)}"/>`).join("")}</w:tblGrid>${hdr}${body}${tot}</w:tbl>`;
+}
+function docLetterhead(rtl){
+  const lh = letterheadLines();
+  let x = "";
+  if(lh.ar) x += docPara(lh.ar, { align: "center", b: true, sz: 34, color: "14432A", rtl: true, after: 20 });
+  x += docPara(lh.bn, { align: "center", b: true, sz: 36, color: "14432A", after: 20 });
+  x += docPara(lh.sub, { align: "center", sz: 20, border: true, after: 140 });
+  return x;
+}
+function buildDocx(spec){
+  const landscape = !!spec.landscape;
+  const rtl = !!spec.rtl;
+  let body = spec.noLetterhead ? "" : docLetterhead(rtl);
+  if(spec.blocks){
+    body += spec.blocks;
+  } else {
+    spec.sections.forEach((sec, si) => {
+      if(si > 0) body += `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
+      body += docPara((spec.title || "") + (sec.title && sec.title !== spec.title ? " — " + sec.title : ""), { align: "center", b: true, sz: 28, after: 60 });
+      body += docPara("তারিখ: " + fmtDate(todayISO()), { align: "right", sz: 18, after: 80 });
+      (sec.notes || []).forEach(n => { body += docPara(n, { sz: 20, after: 40 }); });
+      body += docTable(sec.head, sec.rows, { totals: sec.totals, rtl });
+      body += docPara("", { after: 60 });
+    });
+  }
+  const pg = landscape ? `<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>` : `<w:pgSz w:w="11906" w:h="16838"/>`;
+  const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr>${pg}<w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Nirmala UI" w:hAnsi="Nirmala UI" w:eastAsia="Nirmala UI" w:cs="Nirmala UI"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="bn-BD" w:bidi="ar-SA"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`;
+  return makeZip([
+    { name: "[Content_Types].xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>` },
+    { name: "_rels/.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>` },
+    { name: "word/_rels/document.xml.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: "word/document.xml", data: doc },
+    { name: "word/styles.xml", data: styles }
+  ], "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+}
+function saveBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function safeFileName(s){ return String(s || "export").replace(/[\\\/:*?"<>|]+/g, " ").replace(/\s+/g, "-").slice(0, 60); }
+/* spec: { file, title, sections:[{title, head, rows, totals, notes}], landscape, rtl, blocks, formats:["xlsx","docx","csv"] } */
+function openExportChooser(spec){
+  const old = document.getElementById("exportChooser"); if(old) old.remove();
+  const formats = spec.formats || ["xlsx", "docx", "csv"];
+  const ov = document.createElement("div");
+  ov.id = "exportChooser";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;";
+  const btn = (id, label) => `<button data-fmt="${id}" style="display:block;width:100%;padding:13px;margin-top:10px;border:0;border-radius:12px;background:#14432A;color:#fff;font-size:16px;font-weight:700;font-family:inherit;">${label}</button>`;
+  ov.innerHTML = `<div style="background:#fff;border-radius:18px;padding:18px;max-width:340px;width:100%;font-family:inherit;">
+    <div style="font-weight:800;font-size:17px;">📤 এক্সপোর্ট</div>
+    <div style="font-size:13px;color:#5B6357;margin-top:4px;">${esc(spec.title || "")}</div>
+    ${formats.includes("xlsx") ? btn("xlsx", "📊 Excel (.xlsx)") : ""}${formats.includes("docx") ? btn("docx", "📝 Word (.docx)") : ""}${formats.includes("csv") ? btn("csv", "📄 CSV") : ""}
+    <button data-fmt="cancel" style="display:block;width:100%;padding:11px;margin-top:10px;border:1.5px solid #14432A;border-radius:12px;background:#fff;color:#14432A;font-size:15px;font-family:inherit;">বাতিল</button></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", ev => {
+    const b = ev.target.closest("[data-fmt]");
+    if(!b && ev.target !== ov) return;
+    const fmt = b ? b.dataset.fmt : "cancel";
+    if(fmt === "cancel"){ ov.remove(); return; }
+    try{
+      const base = safeFileName(spec.file || spec.title) + "-" + todayISO();
+      if(fmt === "xlsx") saveBlob(buildXlsx(spec), base + ".xlsx");
+      else if(fmt === "docx") saveBlob(buildDocx(spec), base + ".docx");
+      else if(fmt === "csv"){
+        const sec = spec.sections[0];
+        downloadCSVRaw(base + ".csv", sec.head.map(cellText), sec.rows.map(r => r.map(cellText)));
+      }
+    }catch(err){ alert("এক্সপোর্ট করা যায়নি: " + err.message); }
+    ov.remove();
+  });
+}
+function exportSingleTable(opts){
+  openExportChooser({ file: opts.file || opts.title, title: opts.title, landscape: (opts.head || []).length > 7, sections: [{ title: opts.title, head: opts.head, rows: opts.rows, totals: opts.totals, notes: opts.notes }], formats: opts.formats });
+}
+
+/* ---- বিভিন্ন ট্যাব থেকে এক্সপোর্টের তথ্য ---- */
+function exportResultSheet(isMerit){
+  const exam = miscState.tabExamName;
+  if(!exam){ alert("প্রথমে পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const res = computeClassResults(exam, miscState.tabClassFilter || "all");
+  if(!res.groups.length){ alert("এই পরীক্ষা ও শ্রেণির জন্য কোনো ফলাফল পাওয়া যায়নি।"); return; }
+  const sections = res.groups.map(g => {
+    if(isMerit){
+      const passed = g.rows.filter(r => r.passed);
+      return { title: g.className, head: ["মেধাক্রম","আইডি","ছাত্রের নাম","মোট নম্বর","শতকরা","বিভাগ"],
+        rows: passed.map(r => [bnOrdinal(r.position), r.student.sid || "", r.student.name, r.total + "/" + r.fullTotal, Math.round(r.pct * 100) / 100, DIVISION_SHORT[r.divKey]]),
+        notes: [exam + " — মেধা তালিকা"] };
+    }
+    const fm = sub => (g.rows.map(r => r.items.find(i => i.sub === sub)).find(i => i && !i.missing) || {}).full;
+    return { title: g.className, head: ["মেধাক্রম","আইডি","ছাত্রের নাম", ...g.subjects.map(s => s + (fm(s) ? " (" + bn(fm(s)) + ")" : "")), "মোট","শতকরা","বিভাগ","ফলাফল"],
+      rows: g.rows.map(r => [r.position ? bnOrdinal(r.position) : "—", r.student.sid || "", r.student.name,
+        ...r.items.map(i => i.missing ? "-" : i.absent ? "অনু." : i.got), r.total + "/" + r.fullTotal, Math.round(r.pct * 100) / 100, divisionShort(r), statusLabel(r)]),
+      notes: [exam + " — ফলাফল শীট", divisionRuleText(res.cfg)] };
+  });
+  openExportChooser({ file: (isMerit ? "মেধা-তালিকা-" : "ফলাফল-শীট-") + exam, title: (isMerit ? "মেধা তালিকা — " : "ফলাফল শীট — ") + exam, landscape: !isMerit, sections, formats: ["xlsx", "docx"] });
+}
+function exportClassRoutine(){
+  const day = miscState.routineDay || "প্রতিদিন", mode = miscState.routineMode || "class";
+  const m = classGridModel(mode, day);
+  if(!m.entries.length){ alert("এই বারের জন্য ঘণ্টাভিত্তিক কোনো রুটিন নেই।"); return; }
+  const head = [mode === "teacher" ? "শিক্ষক" : "শ্রেণি", ...m.cols.map(i => PERIOD_LABELS[i - 1] + (m.cfg.periods[i - 1] ? " (" + m.cfg.periods[i - 1] + ")" : ""))];
+  const rows = m.keys.map(k => [k, ...m.cols.map(i => m.entries.filter(r => Number(r.period) === i && (mode === "teacher" ? (r.teacher || "(শিক্ষক নির্ধারিত নেই)") === k : r.className === k)).map(r => mode === "teacher" ? r.subject + " (" + r.className + ")" : r.subject).join(" / "))]);
+  exportSingleTable({ file: "ক্লাস-রুটিন", title: m.cfg.classTitle + (mode === "teacher" ? " (শিক্ষকভিত্তিক)" : "") + " " + m.cfg.classYearText, head, rows, formats: ["xlsx", "docx"] });
+}
+function exportExamRoutine(examName){
+  if(!examName){ alert("প্রথমে পরীক্ষার নাম নির্বাচন করুন।"); return; }
+  const m = examGridModel(examName);
+  if(!m.rows.length){ alert("এই পরীক্ষার জন্য তারিখসহ কোনো রুটিন নেই।"); return; }
+  const head = ["শ্রেণি", ...m.slots.map(s => fmtDateDayMonth(s.date) + " " + weekdayBn(s.date) + (s.sess ? " (" + s.sess + ")" : ""))];
+  const rows = m.classes.map(c => [c, ...m.slots.map(s => { const l = m.rows.filter(r => r.className === c && r.date === s.date && (r.time || "") === s.sess); return l.length ? l.map(r => r.subject).join(" + ") : "—"; })]);
+  exportSingleTable({ file: "পরীক্ষার-রুটিন-" + examName, title: examName + " — পরীক্ষার রুটিন", head, rows, formats: ["xlsx", "docx"] });
+}
+function exportMarksSheet(){
+  const v = boxValues("marksBox");
+  const people = v.names ? seatOrderedStudents(v.cls || "all") : [];
+  if(v.names && !people.length){ alert("এই শ্রেণিতে কোনো ছাত্র নেই।"); return; }
+  const n = v.names ? people.length : clampN(parseInt(v.rows, 10) || 30, 1, 150);
+  const rows = Array.from({ length: n }, (_, i) => [bn(i + 1), people[i] && people[i].admissionNo ? people[i].admissionNo : "", people[i] ? people[i].name : "", "", "", ""]);
+  const exam = v.exam && v.exam !== "__new__" ? v.exam : "";
+  const subj = v.subject && v.subject !== "__new__" ? v.subject : "";
+  openExportChooser({ file: "নম্বরপত্র", title: "নম্বরপত্র" + (exam ? " — " + exam : ""), sections: [{ title: "নম্বরপত্র", head: ["ক্রমিক","ভর্তি নং","ছাত্রের নাম","প্রাপ্ত নম্বর","কথায়","মন্তব্য"], rows,
+    notes: ["শ্রেণি: " + (v.cls && v.cls !== "all" ? v.cls : "............") + "    বিষয়: " + (subj || "............") + "    পূর্ণমান: " + (v.full ? bn(v.full) : "............")] }], formats: ["xlsx", "docx"] });
+}
+function exportSeatList(){
+  const v = boxValues("seatPlanBox");
+  const plan = buildSeatPlan(v);
+  const sections = plan.rooms.map(room => ({ title: (v.room || "পরীক্ষা কক্ষ") + (plan.rooms.length > 1 ? " " + bn(room.index) : ""), head: ["আসন নং","ছাত্রের নাম","শ্রেণি","আইডি"],
+    rows: room.seats.map(s => [s.no, s.person ? s.person.name : "", s.person ? s.person.className : "", s.person ? (s.person.sid || "") : ""]) }));
+  openExportChooser({ file: "সিট-প্ল্যান", title: "সিট প্ল্যান", sections, formats: ["xlsx", "docx"] });
+}
+function exportNoticeWord(n){
+  const est = getBrandingConfig().est === undefined ? "১৯৪১" : getBrandingConfig().est;
+  let b = "";
+  b += docPara("তাং " + fmtDateSlash(n.date) + " ইং", { align: "right", after: 40 });
+  b += docPara("সূত্র" + (n.ref ? " : " + n.ref : ""), { after: 100 });
+  if(n.subject) b += docPara("বিষয় : " + n.subject, { align: "center", b: true, u: true, sz: 26, after: 100 });
+  String(n.body || "").split(/\n+/).filter(x => x.trim()).forEach(p => { b += docPara(p, { align: "both", ind: 500, sz: 26, after: 120 }); });
+  const fees = (n.fees || []).filter(f => f.cls && f.amt !== "" && f.amt != null);
+  if(fees.length) b += docTable(["শ্রেণি", "নির্ধারিত ফি"], fees.map(f => [f.cls, bn(f.amt) + "/="]), { sz: 22 });
+  if(n.attachCommittee && (db.committee || []).length){
+    b += docPara("সদস্যবৃন্দ (বিতরণ):", { b: true, sz: 24, before: 160, after: 60 });
+    b += docTable(["ক্রম", "নাম", "পদবী"], committeeSorted().map((m, i) => [bn(i + 1), m.name, m.post]), { sz: 20 });
+  }
+  b += docPara("", { after: 200 });
+  if(n.order !== false) b += docPara("আদেশক্রমে", { align: "right", after: 400 });
+  if(n.signerName) b += docPara(n.signerName, { align: "right", b: true, after: 20 });
+  b += docPara(n.signerTitle || "", { align: "right" });
+  const blob = buildDocx({ blocks: b });
+  saveBlob(blob, "নোটিস-" + (n.date || todayISO()) + ".docx");
+}
+function exportQuestionPaperWord(){
+  const v = boxValues("qpBox");
+  const qs = selectedQuestions();
+  if(!qs.length){ alert("প্রশ্ন ব্যাংক থেকে অন্তত একটি প্রশ্ন বাছুন।"); return; }
+  const rtl = v.dir === "rtl";
+  const total = qs.reduce((a, q) => a + (Number(q.marks) || 0), 0);
+  const subj = v.subject && v.subject !== "__new__" ? v.subject : "";
+  const exam = v.exam && v.exam !== "__new__" ? v.exam : "";
+  const letters = rtl ? AR_LETTERS : BN_LETTERS;
+  const al = rtl ? "right" : "left";
+  let b = docPara("প্রশ্নপত্র" + (exam ? " — " + exam : ""), { align: "center", b: true, sz: 30, after: 80, rtl });
+  b += docTable(["শ্রেণি", "কিতাব/বিষয়", "পূর্ণমান", "সময়", "তারিখ"], [[v.cls && v.cls !== "__new__" ? v.cls : "", subj, bn(Number(v.full) || Math.round(total * 100) / 100), v.time || "", v.date ? fmtDate(v.date) : ""]], { sz: 20, rtl });
+  if(v.instr) b += docPara(v.instr, { sz: 20, before: 100, after: 100, rtl, align: al });
+  let n = 0, si = 0;
+  QTYPE_ORDER.forEach(t => {
+    const items = qs.filter(q => q.type === t);
+    if(!items.length) return;
+    const T = QTYPES[t];
+    const secTotal = items.reduce((a, q) => a + (Number(q.marks) || 0), 0);
+    b += docPara(`${letters[si++] || ""}. ${rtl ? T.ar : T.bn} — ${rtl ? T.har : T.hbn}   (${bn(Math.round(secTotal * 100) / 100)} নম্বর)`, { b: true, sz: 26, color: "14432A", before: 160, after: 60, rtl, align: al });
+    items.forEach(q => {
+      n++;
+      b += docPara(`${bn(n)}. ${q.text}   [${bn(q.marks)}]`, { sz: 24, after: 40, rtl, align: al });
+      if(q.options && q.options.length) b += docPara(q.options.map((o, i) => (letters[i] || "") + ") " + o).join("      "), { sz: 22, after: 100, rtl, align: al });
+    });
+  });
+  b += docPara("— সমাপ্ত —", { align: "center", b: true, before: 160 });
+  saveBlob(buildDocx({ blocks: b, rtl }), "প্রশ্নপত্র-" + safeFileName(subj || v.cls || "") + "-" + todayISO() + ".docx");
+}
+function injectExportButtons(){
+  const skip = ["idCards", "attendanceRegister", "boardingAttendanceRegister", "teacherAttendanceRegister"];
+  document.querySelectorAll("button[data-print]").forEach(b => {
+    const key = b.dataset.print;
+    if(skip.includes(key)) return;
+    const nx = b.nextElementSibling;
+    if(nx && nx.hasAttribute("data-export")) return;
+    const e = document.createElement("button");
+    e.className = "btn ghost small"; e.type = "button"; e.setAttribute("data-export", key); e.textContent = "📤 Excel/Word";
+    b.insertAdjacentElement("afterend", e);
+  });
+}
+
+/* ============================ প্রস্তুত প্রশ্নপত্র লাইব্রেরি ============================ */
+const READY_PAPERS_SEED = [{"id": "seed-fiqh-8", "title": "علم الفقه – الصف الثامن – الاختبار الثاني ٢٠٢٦", "lang": "ar", "html": "<!DOCTYPE html>\n<html lang=\"ar\" dir=\"rtl\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n<title>علم الفقه – الصف الثامن – الاختبار الثاني ٢٠٢٦</title>\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;600;700&family=Noto+Serif+Bengali:wght@400;600&display=swap\" rel=\"stylesheet\">\n<style>\n  :root{\n    --bg:#e9e9e6; --bar:#ffffff; --bar-text:#222; --btn:#1f6f43; --btn-text:#fff;\n    box-sizing:border-box;\n    padding-top:env(safe-area-inset-top,0px);\n    padding-bottom:env(safe-area-inset-bottom,0px);\n  }\n  @media (prefers-color-scheme: dark){\n    :root:not([data-theme=\"light\"]){ --bg:#1d1d1b; --bar:#2a2a28; --bar-text:#eee; }\n  }\n  :root[data-theme=\"dark\"]{ --bg:#1d1d1b; --bar:#2a2a28; --bar-text:#eee; }\n  html{ scroll-padding-top:env(safe-area-inset-top,0px); }\n  *{ box-sizing:border-box; }\n  body{ margin:0; background:var(--bg); font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic','Arial',serif; color:#000; }\n\n  .toolbar{ position:sticky; top:env(safe-area-inset-top,0px); z-index:5; display:flex; gap:10px; align-items:center; justify-content:space-between;\n    padding:10px 14px; background:var(--bar); color:var(--bar-text); font-size:14px; box-shadow:0 1px 4px rgba(0,0,0,.2);\n    font-family:'Noto Serif Bengali',sans-serif; direction:ltr; }\n  .toolbar button{ background:var(--btn); color:var(--btn-text); border:0; border-radius:8px; padding:8px 14px; font:inherit; font-weight:600; }\n\n  .scroller{ overflow-x:auto; padding:14px; }\n  .paper{ background:#fff; color:#000; width:210mm; max-width:none; min-height:297mm; margin:0 auto; padding:14mm 16mm; box-shadow:0 2px 12px rgba(0,0,0,.25); font-size:16pt; line-height:2; }\n\n  .head{ text-align:center; border-bottom:2px solid #000; padding-bottom:6px; margin-bottom:6px; }\n  .head h1{ font-size:22pt; margin:0; line-height:1.6; font-weight:700; }\n  .head .exam{ display:inline-block; margin-top:2px; padding:0 22px; border:1.5px solid #000; border-radius:22px; font-weight:700; font-size:16pt; }\n\n  .meta{ display:flex; justify-content:space-between; font-weight:700; font-size:15pt; padding:2px 0; line-height:1.9; }\n  .meta + .meta{ border-bottom:1px solid #000; padding-bottom:4px; }\n  .studentline{ display:flex; gap:12px; font-size:14pt; padding:4px 0; }\n  .studentline span.fill{ flex:1; border-bottom:1px dotted #000; }\n  .instr{ text-align:center; font-weight:700; margin:6px 0 10px; font-size:17pt; }\n\n  .q{ margin:0 0 6px; }\n  .qt{ font-weight:700; font-size:18pt; text-decoration:underline; text-underline-offset:5px; margin:8px 0 2px; break-after:avoid; page-break-after:avoid; }\n  .part{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin:0 0 4px; break-inside:avoid; page-break-inside:avoid; }\n  .part .txt{ flex:1; }\n  .part .mark{ white-space:nowrap; font-weight:700; border:1px solid #000; border-radius:6px; padding:0 8px; line-height:1.7; min-width:2em; text-align:center; }\n  .part .mark.empty{ visibility:hidden; }\n  .passage{ margin-top:2px; text-align:justify; }\n\n  .end{ text-align:center; margin-top:10px; font-weight:700; }\n\n  @page{ size:A4; margin:10mm; }\n  @media print{\n    body{ background:#fff; }\n    .toolbar{ display:none !important; }\n    .scroller{ padding:0; overflow:visible; }\n    .paper{ box-shadow:none; margin:0; width:auto; min-height:0; padding:0; }\n    *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }\n  }\n</style>\n</head>\n<body>\n\n<div class=\"toolbar\">\n  <button onclick=\"window.print()\">🖨️ প্রিন্ট / PDF</button>\n  <span>ছাপার আগে লেখা ক্লিক করে সম্পাদনা করা যাবে</span>\n</div>\n\n<div class=\"scroller\">\n<div class=\"paper\" contenteditable=\"true\" spellcheck=\"false\">\n\n  <div class=\"head\">\n    <h1>المدرسة الإسلامية الحسينية حُسَينِيَّا مَدْرَسَة</h1>\n    <span class=\"exam\">الاختبار الثانى - ١٤٤٨ هـ / ٢٠٢٦ م</span>\n  </div>\n\n  <div class=\"meta\"><span>المرحلة : المتوسطة</span><span>الصف : الثامن</span></div>\n  <div class=\"meta\"><span>المادة : علم الفقه</span><span>الكتاب : نور الايضاح</span></div>\n  <div class=\"meta\"><span>الرقم الكامل : ١٠٠ <span style=\"font-weight:400;font-size:14pt\">— والأربعة منها لحسن الكتابة وجودة الأسلوب</span></span><span>الوقت : ثلاث ساعات</span></div>\n\n  <div class=\"studentline\">\n    <span>الاسم :</span><span class=\"fill\"></span>\n    <span>الرقم :</span><span class=\"fill\" style=\"max-width:90px\"></span>\n    <span>التاريخ :</span><span class=\"fill\" style=\"max-width:120px\"></span>\n  </div>\n\n  <div class=\"instr\">★ أجب عن أي ثلاث أسئلة فقط ★</div>\n\n  <!-- السؤال الأول -->\n  <div class=\"qt\">السؤال الأول:</div>\n  <div class=\"part\"><div class=\"txt\">(أ) اُذْكُرْ نَوَاقِضَ الْوُضُوءِ بِتَرْتِيبٍ وَضَاح.</div><div class=\"mark\">١١</div></div>\n  <div class=\"part\"><div class=\"txt\">(ب) كَمْ قِسْمًا لِلْوُضُوءِ؟ اُكْتُبْهَا بِحَسَبِ كِتَابِكَ بِأُسْلُوبٍ جَمِيل.</div><div class=\"mark\">١١</div></div>\n  <div class=\"part\"><div class=\"txt\">(ج) ترجم العبارة الاتية بعد التشكيل :-\n    <div class=\"passage\">يصح بشروط ثمانية:  الاول النية وحقيقتها عقد القلب على الفعل ووقتها عند ضرب يده على ما يتيمم به شروط صحة النية ثلاثة)(١)الاسلام (٢)والتمييز(٣)العلم بما ينويه ويشترط لصحه نيه التيمم راتبه.</div></div><div class=\"mark empty\">&nbsp;</div></div>\n\n  <!-- السؤال الثاني -->\n  <div class=\"qt\">السؤال الثاني :</div>\n  <div class=\"part\"><div class=\"txt\">(أ) مَتَى يُؤْمَرُ الْوَلَدُ بِالصَّلَاةِ؟ وَمَتَى يُضْرَبُ إِذَا لَمْ يُصَلِّ؟ وَمَتَى تَفْرُضُ الصَّلَاةُ؟</div><div class=\"mark\">١٠</div></div>\n  <div class=\"part\"><div class=\"txt\">(ب) اُكْتُبْ أَوْقَاتَ كَرَاهَةِ الصَّلَاةِ كَمَا هِيَ مَذْكُورَةٌ فِي الْكِتَابِ بِصُورَةٍ جَمِيلَةٍ.</div><div class=\"mark\">١٠</div></div>\n  <div class=\"part\"><div class=\"txt\">(ج) كَمْ شَيْئًا يَجِبُ لِصِحَّةِ الصَّلَاةِ؟ اُكْتُبْ عَشَرَةً مِنْهَا.</div><div class=\"mark\">١٣</div></div>\n\n  <!-- السؤال الثالث -->\n  <div class=\"qt\">السؤال الثالث:</div>\n  <div class=\"part\"><div class=\"txt\">(أ) اُكْتُبْ عَشَرَةً مِنْ وَاجِبَاتِ الصَّلَاةِ بِصُورَةٍ جَمِيلَةٍ.</div><div class=\"mark\">١١</div></div>\n  <div class=\"part\"><div class=\"txt\">(ب) مَا حُكْمُ صَلَاةِ الْجَمَاعَةِ؟ وَكَمْ شَرْطًا لِصِحَّةِ إِمَامَةِ الرِّجَالِ الْأَصِحَّاءِ؟</div><div class=\"mark\">١١</div></div>\n  <div class=\"part\"><div class=\"txt\">(ج) ترجم لعبارة الاتية بعد التشكيل :-\n    <div class=\"passage\">فيما يفعله المقتدي بعد فراغي من واجب وغيره لو سلم الامام قبل فراغ المقتدي من التشهد يتم ولو رفع الامام راسه قبل تسبيح المقتدي ثلاثا في الركوع او السجود يتابعه ولو زاد الامام سجده يعود الاخر ساهيا لا يتبعه المؤتم.</div></div><div class=\"mark\">١١</div></div>\n  <div class=\"part\"><div class=\"txt\">(د) اُكْتُبْ عِشْرِينَ مِنْ مُفْسِدَاتِ الصَّلَاةِ مَعَ تَوْضِيحِهَا بِصُورَةٍ وَاضِحَةٍ.</div><div class=\"mark\">١٢</div></div>\n  <div class=\"part\"><div class=\"txt\">(هـ) اُكْتُبْ خَمْسَةَ عَشَرَ أَمْرًا مَكْرُوهًا لِلْمُصَلِّي.</div><div class=\"mark empty\">&nbsp;</div></div>\n\n  <!-- السؤال الرابع -->\n  <div class=\"qt\">السؤال الرابع:</div>\n  <div class=\"part\"><div class=\"txt\">(أ) بَيِّنِ الْأَسْبَابَ الَّتِي يَجِبُ وَيَجُوزُ بِسَبَبِهَا قَطْعُ الصَّلَاةِ.</div><div class=\"mark\">١٠</div></div>\n  <div class=\"part\"><div class=\"txt\">(ب) كَمْ شَرْطًا لِصِحَّةِ نِيَّةِ السَّفَرِ؟ وَمَا هِيَ؟ اُكْتُبْهَا بِالتَّفْصِيلِ.</div><div class=\"mark\">١٠</div></div>\n  <div class=\"part\"><div class=\"txt\">(ج) مَتَى تَسْقُطُ فَرْضِيَّةُ الصَّلَاةِ وَالصَّوْمِ؟ اُكْتُبْ ذَلِكَ بِالتَّفْصِيل.</div><div class=\"mark\">٦</div></div>\n  <div class=\"part\"><div class=\"txt\">(د) اذْكُرْ مِقْدَارَ فِدْيَةِ كُلِّ صَلَاةٍ وَكُلِّ يَوْمٍ مِنَ الصَّوْمِ وَالْيَمِينِ، وَبَيِّنْ كَيْفِيَّةَ أَدَائِهَا.</div><div class=\"mark empty\">&nbsp;</div></div>\n\n  <div class=\"end\">— انتهت الأسئلة —</div>\n</div>\n</div>\n\n</body>\n</html>\n"}, {"id": "seed-urdu-taisir", "title": "উর্দু তেসরী – ২য় সাময়িক পরীক্ষা ২০২৬", "lang": "bn", "html": "<!DOCTYPE html>\n<html lang=\"bn\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n<title>উর্দু তেসরী – ২য় সাময়িক পরীক্ষা ২০২৬</title>\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@400;600;700&family=Noto+Nastaliq+Urdu:wght@400;600&display=swap\" rel=\"stylesheet\">\n<style>\n  :root{\n    --bg:#e9e9e6; --bar:#ffffff; --bar-text:#222; --btn:#1f6f43; --btn-text:#fff;\n    box-sizing:border-box;\n    padding-top:env(safe-area-inset-top,0px);\n    padding-bottom:env(safe-area-inset-bottom,0px);\n  }\n  @media (prefers-color-scheme: dark){\n    :root:not([data-theme=\"light\"]){ --bg:#1d1d1b; --bar:#2a2a28; --bar-text:#eee; }\n  }\n  :root[data-theme=\"dark\"]{ --bg:#1d1d1b; --bar:#2a2a28; --bar-text:#eee; }\n  html{ scroll-padding-top:env(safe-area-inset-top,0px); }\n  *{ box-sizing:border-box; }\n  body{ margin:0; background:var(--bg); font-family:'Noto Serif Bengali','Kalpurush','SolaimanLipi','Nirmala UI',serif; color:#000; }\n\n  .toolbar{ position:sticky; top:env(safe-area-inset-top,0px); z-index:5; display:flex; gap:10px; align-items:center; justify-content:space-between;\n    padding:10px 14px; background:var(--bar); color:var(--bar-text); font-size:14px; box-shadow:0 1px 4px rgba(0,0,0,.2); }\n  .toolbar button{ background:var(--btn); color:var(--btn-text); border:0; border-radius:8px; padding:8px 14px; font:inherit; font-weight:600; }\n\n  .scroller{ overflow-x:auto; padding:14px; }\n  .paper{ background:#fff; color:#000; width:210mm; max-width:none; min-height:297mm; margin:0 auto; padding:14mm 16mm; box-shadow:0 2px 12px rgba(0,0,0,.25); font-size:13.5pt; line-height:1.6; }\n\n  .head{ text-align:center; border-bottom:2px solid #000; padding-bottom:6px; margin-bottom:8px; }\n  .head h1{ font-size:19pt; margin:0; line-height:1.35; font-weight:700; }\n  .head .addr{ font-size:12pt; margin:0; }\n  .head .exam{ display:inline-block; margin-top:6px; padding:1px 18px; border:1.5px solid #000; border-radius:20px; font-weight:700; font-size:13pt; }\n\n  .meta{ display:flex; justify-content:space-between; font-weight:600; font-size:13pt; padding:4px 0; border-bottom:1px solid #000; }\n  .studentline{ display:flex; justify-content:space-between; gap:12px; font-size:12pt; padding:6px 0 4px; }\n  .studentline span.fill{ flex:1; border-bottom:1px dotted #000; }\n  .instr{ text-align:center; font-weight:700; margin:8px 0 10px; font-size:13pt; }\n\n  .q{ margin:0 0 9px; break-inside:avoid; page-break-inside:avoid; }\n  .qh{ display:flex; justify-content:space-between; gap:10px; font-weight:700; }\n  .qh .mark{ white-space:nowrap; }\n  .qb{ padding-left:1.4em; }\n\n  .ur{ direction:rtl; unicode-bidi:isolate; font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq','Alvi Nastaleeq','Noto Naskh Arabic',serif; font-size:14pt; line-height:2.3; text-align:right; }\n  .words{ display:flex; flex-wrap:wrap; direction:rtl; gap:0 26px; }\n  .words span{ min-width:22%; }\n  .passage{ margin:2px 0; }\n  .blank{ display:inline-block; min-width:70px; border-bottom:1.2px solid #000; height:1em; vertical-align:baseline; }\n  .sub{ margin:2px 0; }\n  .ph{ color:#666; border-bottom:1px dotted #000; min-width:50px; display:inline-block; }\n\n  .end{ text-align:center; margin-top:10px; font-weight:700; letter-spacing:.3em; }\n\n  @page{ size:A4; margin:10mm; }\n  @media print{\n    body{ background:#fff; }\n    .toolbar{ display:none !important; }\n    .scroller{ padding:0; overflow:visible; }\n    .paper{ box-shadow:none; margin:0; width:auto; min-height:0; padding:0; }\n    *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }\n  }\n</style>\n</head>\n<body>\n\n<div class=\"toolbar\">\n  <span>ছাপার আগে লেখা ক্লিক করে সম্পাদনা করা যাবে</span>\n  <button onclick=\"window.print()\">🖨️ প্রিন্ট / PDF</button>\n</div>\n\n<div class=\"scroller\">\n<div class=\"paper\" contenteditable=\"true\" spellcheck=\"false\">\n\n  <div class=\"head\">\n    <h1>বোররচর কাচারি বাজার ইসলামিয়া হুসেইনিয়া মাদ্রাসা</h1>\n    <p class=\"addr\">বোররচর কাচারি বাজার, সদর, ময়মনসিংহ</p>\n    <span class=\"exam\">২য় সাময়িক পরীক্ষা — ২০২৬ ইং</span>\n  </div>\n\n  <div class=\"meta\">\n    <span>বিষয় : উর্দু তেসরী</span>\n    <span>জামাত : তাইসীর</span>\n    <span>পূর্ণমান : ১০০</span>\n  </div>\n  <div class=\"studentline\">\n    <span>নাম :</span><span class=\"fill\"></span>\n    <span>রোল :</span><span class=\"fill\" style=\"max-width:70px\"></span>\n    <span>তারিখ :</span><span class=\"fill\" style=\"max-width:110px\"></span>\n  </div>\n\n  <div class=\"instr\">যে কোনো ১০টি প্রশ্নের উত্তর দাও।</div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>১। শব্দার্থ লিখ (যে কোনো ১০টি)।</span><span class=\"mark\">১০</span></div>\n    <div class=\"ur words\">\n      <span>میسّر</span><span>مظلوم</span><span>آگ بگولہ</span><span>تنخواہ</span><span>جانشین</span>\n      <span>مصلحت</span><span>قابل کاشت</span><span>سپہ سالار</span><span>شجاعت</span><span>تہذیب</span>\n      <span>مشابہ</span><span>افراط</span><span>آشیانہ</span><span>ایثارِ نفس</span>\n    </div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>২। তরজমা কর।</span><span class=\"mark\">১০</span></div>\n    <div class=\"ur passage\">نیت ہمیشہ نیک رکھو، خود عبادت کے طریقے سیکھو، اپنے بھائی بہنوں اور خویش و اقارب کو سکھاؤ، اپنے استاد کا ادب کرو، جو بات سمجھ میں نہ آئے ادب سے دوبارہ دریافت کرو۔</div>\n    <div class=\"ur passage\">خلیفہ ولید کے بھائی خلیفہ سلیمان کا ننانوے ہجری میں جب انتقال ہوا تو ان کی وصیت کے مطابق حضرت عمر بن عبدالعزیز رحمہ اللہ تعالیٰ خلیفہ ہوئے۔</div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৩। তোমার পাঠ্য বই থেকে একটি কবিতার প্রথম ৮ লাইন মুখস্থ লিখ।</span><span class=\"mark\">১০</span></div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৪। উর্দু কর।</span><span class=\"mark\">১০</span></div>\n    <div class=\"qb\" style=\"padding-left:0\">নবীজি সাল্লাল্লাহু আলাইহি ওয়াসাল্লামের বক্ষবিদারণ চারবার হয়েছিল। এর মধ্যে দুইবার নবুয়ত লাভের পূর্বে, একবার নবুয়ত লাভের সময় এবং একবার মেরাজের সময়। প্রথমবার যখন তাঁর বক্ষবিদারণ হয়, তখন তিনি বিবি হালিমা সাদিয়া রা. এর কাছে ছিলেন। তিনি তাঁর দুধ ভাইয়ের সঙ্গে বকরি চরানোর জন্য জঙ্গলে গিয়েছিলেন।</div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৫। উর্দুতে বাক্য রচনা কর (যে কোনো ৫টি)।</span><span class=\"mark\">১০</span></div>\n    <div class=\"ur words\">\n      <span>جب</span><span>إبليس</span><span>طائف</span><span>عورت</span>\n      <span>توحيد</span><span>قريش</span><span>إسلام</span><span>رسول</span>\n    </div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৬। শূন্যস্থান পূরণ কর।</span><span class=\"mark\">১০</span></div>\n    <div class=\"ur passage\" style=\"line-height:2.6\">\n      روایت ہے کہ <span class=\"blank\"></span> سے قبل ایک دن غصے میں آ کر <span class=\"blank\"></span> نے نبی کریم صلی اللہ علیہ وسلم کو <span class=\"blank\"></span> کرنے کا ارادہ کیا۔ تلوار <span class=\"blank\"></span> کر گھر سے نکلے کہ اتفاق سے ایک صحابی <span class=\"blank\"></span> راستے میں مل گئے۔\n    </div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৭। পড়ার যে কোনো ৩টি আদব লিখ।</span><span class=\"mark\">১০</span></div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৮। তোমার পাঠ্যবই থেকে যে কোনো ৫টি হাদিস লিখ।</span><span class=\"mark\">১০</span></div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>৯। সংক্ষেপে ইমাম আবু হানিফা রহ. এর জীবনী লিখ।</span><span class=\"mark\">১০</span></div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>১০। শব্দগুলোর বহুবচন লিখে অর্থ লিখ।</span><span class=\"mark\">১০</span></div>\n    <div class=\"ur words\"><span class=\"ph\">&nbsp;</span><span class=\"ph\">&nbsp;</span><span class=\"ph\">&nbsp;</span><span class=\"ph\">&nbsp;</span><span class=\"ph\">&nbsp;</span></div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>১১। উম্মাহাতুল মুমিনিনগণের নাম লিখ।</span><span class=\"mark\">১০</span></div>\n  </div>\n\n  <div class=\"q\">\n    <div class=\"qh\"><span>১২। সংক্ষিপ্ত প্রশ্নের উত্তর দাও।</span><span class=\"mark\">১০</span></div>\n    <div class=\"qb\">\n      <div class=\"sub\">(ক) বদরের যুদ্ধে মুসলমান ও কাফেরের সৈন্য সংখ্যা কত ছিল?</div>\n      <div class=\"sub\">(খ) নবীজি সা. এর শেষ ওছিয়ত কি ছিল?</div>\n      <div class=\"sub\">(গ) হযরত উমর রা. কত বছর, কত মাস, কত দিন খেলাফত পরিচালনা করেন?</div>\n      <div class=\"sub\">(ঘ) ইসলামের সর্ব প্রথম শহীদের নাম কি?</div>\n      <div class=\"sub\">(ঙ) নারী, পুরুষ, যুবক ও গোলামদের মধ্যে সর্বপ্রথম কোন কোন ব্যক্তি ইসলাম গ্রহণ করে?</div>\n    </div>\n  </div>\n\n  <div class=\"end\">— সমাপ্ত —</div>\n</div>\n</div>\n\n</body>\n</html>\n"}];
+const READY_PAPERS_SEED_2 = [{"id": "seed2-3", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — সিরাত (নাহবেমীর)", "lang": "bn", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — সিরাত (নাহবেমীর)</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:13.5pt;line-height:1.65}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head p{margin:0;font-size:12pt}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 9px;break-inside:avoid;page-break-inside:avoid}\n.q .n{font-weight:700}\n.sub{margin:2px 0 2px 1.4em}\n.ur{direction:rtl;font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq','Noto Naskh Arabic',serif;font-size:14pt;line-height:2.3;text-align:right;margin:3px 0}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .meta{font-size:15pt}\n.ar .head h1{font-size:22pt}\n.pt{display:flex;justify-content:space-between;gap:12px;margin:0 0 4px;break-inside:avoid}\n.pt .t{flex:1}\n.pt .m{font-weight:700;border:1px solid #000;border-radius:6px;padding:0 8px;line-height:1.7;min-width:2em;text-align:center;align-self:flex-start}\n.pt .m.e{visibility:hidden}\n.ps{text-align:justify;margin-top:2px}\n.vs{margin:0 0 4px;text-align:center}\n.bl{display:inline-block;min-width:110px;border-bottom:1px dotted #000}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p1\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><h1>বোররচর কাচারি বাজার ইসলামিয়া হুসেইনিয়া মাদ্রাসা</h1><p>বোররচর কাচারি বাজার, সদর, ময়মনসিংহ।</p><span class=\"exam\">২য় সাময়িক পরীক্ষা ২০২৬ ইং</span></div>\n<div class=\"meta\"><span>বিষয় :- সিরাতে খাতামুল আম্বিয়া</span><span>জামাত :- নাহবেমীর</span><span>পূর্ণমান :- ১০০</span></div>\n<div class=\"sl\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n<div class=\"q\"><span class=\"n\">১.</span> নবীজি সাল্লাল্লাহু আলাইহি ওয়াসাল্লামের সম্মানিতা মাতার ইন্তেকালের ঘটনা সুন্দর করে লিখে তার প্রথম কথা কি ছিল আরবিতে লিখ।</div>\n<div class=\"q\"><span class=\"n\">২.</span> হযরত খাদিজা রাদিয়াল্লাহু তা'আলা আনহার সাথে নবীজি সাল্লাল্লাহু আলাইহি ওয়াসাল্লামের বিবাহের ঘটনা সংক্ষেপে লিখে খাদিজার গর্ভে নবী সাল্লাল্লাহু আলাইহি ওয়াসাল্লামের কতজন সন্তান জন্মগ্রহণ করেছিল ও তাদের নাম কি সুন্দর করে লিখ।</div>\n<div class=\"q\"><span class=\"n\">৩.</span> হুজুর সাল্লাল্লাহু আলাইহি ওয়াসাল্লাম কতগুলো বিবাহ করেন এবং সম্মানিতা স্ত্রীগণের নাম কি ছিল সুন্দর করে লিখ।</div>\n<div class=\"q\"><span class=\"n\">৪.</span> বাংলায় অনুবাদ কর :-\n<div class=\"ur\">اس کے علاوہ تاریخ کے دفتر سامنے هیں، جن میں بلا اختلاف موجود ہے کہ آن حضرت صلی اللہ علیہ وسلم کے عمر شریف کے یہ تریپن سال اس طرح گزرے ہیں کہ ابتدائی بے سروسامانی اور بے کسی کے بعد جب اسلام کو ایک ظاہری قوت حاصل بھی ہوئی برے برے  شجاع و بہادر اور متمول صحابہ داخلِ اسلام بھی ہو گئے، اس وقت بھی اسلام نے کسی کافر پر ہاتھ نہیں اٹھایا، بلکہ ظالموں کے ظلم کا جواب تک نہیں دیا۔</div></div>\n<div class=\"q\"><span class=\"n\">৫.</span> তোফায়েল বিন আমর দাউসি এর ইসলাম গ্রহণের ঘটনা সংক্ষেপে লিখ।</div>\n<div class=\"q\"><span class=\"n\">৬.</span> সুরাকা ইবনে মালিক এর ঘটনা সুন্দর করে লিখ।</div>\n<div class=\"q\"><span class=\"n\">৭.</span> ইসলাম তলোয়ারের মাধ্যমে প্রচার হয়নি এর স্বপক্ষে তোমার কিতাব অনুযায়ী যুক্তি দাও।</div>\n<div class=\"q\"><span class=\"n\">৮.</span> গাজওয়া ও সারিয়া কাকে বলে? নবীজি সাল্লাল্লাহু আলাইহি ওয়াসাল্লাম এর জীবদ্দশায় কতগুলো গাজওয়া ও সারিয়া সংঘটিত হয়েছিল - সুন্দর করে লিখ।</div>\n<div class=\"q\"><span class=\"n\">৯.</span> বদরের যুদ্ধ কত হিজরীতে সংঘঠিত হয়েছিল এর ঘটনা খুব সুন্দর করে লিখ।</div>\n<div class=\"q\"><span class=\"n\">১০.</span> আবুল আস এর পরিচয় দাও? বদরের যুদ্ধে তার বন্দী হওয়া ও ইসলাম গ্রহণ করা সম্পর্কে যা জানো লিখ।</div>\n<div class=\"q\"><span class=\"n\">১১.</span> গাজওয়ার নাম গুলো সুন্দর করে লিখ।</div>\n<div class=\"q\"><span class=\"n\">১২.</span>\n<div class=\"sub\">(ক) কিবলা পরিবর্তন সম্পর্কে যা জানো লিখ।</div>\n<div class=\"sub\">(খ) কত হিজরীতে ঈদুল ফিতর, সাদকায়ে ফিতির, ঈদুল আযহা ও কোরবানি ওয়াজিব হয়?</div>\n<div class=\"sub\">(গ) রমজানের রোজা কত হিজরীতে ফরজ হয়?</div>\n<div class=\"sub\">(ঘ) নবীজি সাল্লাল্লাহু আলাইহি ওয়াসাল্লামের কতজন চাচা ও ফুফু ছিল?</div>\n<div class=\"sub\">(ঙ) আমুল হুজন বা দুশ্চিন্তার বছর বলতে কি বুঝায়?</div></div>\n<div class=\"end\">— সমাপ্ত —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-4", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — ফিকহ মুয়াসসার", "lang": "ar", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — ফিকহ মুয়াসসার</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:13.5pt;line-height:1.65}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head p{margin:0;font-size:12pt}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 9px;break-inside:avoid;page-break-inside:avoid}\n.q .n{font-weight:700}\n.sub{margin:2px 0 2px 1.4em}\n.ur{direction:rtl;font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq','Noto Naskh Arabic',serif;font-size:14pt;line-height:2.3;text-align:right;margin:3px 0}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .meta{font-size:15pt}\n.ar .head h1{font-size:22pt}\n.pt{display:flex;justify-content:space-between;gap:12px;margin:0 0 4px;break-inside:avoid}\n.pt .t{flex:1}\n.pt .m{font-weight:700;border:1px solid #000;border-radius:6px;padding:0 8px;line-height:1.7;min-width:2em;text-align:center;align-self:flex-start}\n.pt .m.e{visibility:hidden}\n.ps{text-align:justify;margin-top:2px}\n.vs{margin:0 0 4px;text-align:center}\n.bl{display:inline-block;min-width:110px;border-bottom:1px dotted #000}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p2 ar\" dir=\"rtl\" lang=\"ar\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><h1 style=\"font-family:'Noto Serif Bengali',serif;font-size:19pt\">বোররচর কাচারি বাজার ইসলামিয়া হুসাইনিয়া মাদ্রাসা</h1><p style=\"font-family:'Noto Serif Bengali',serif;direction:ltr\">বোররচর কাচারি বাজার, সদর, ময়মনসিংহ।</p><span class=\"exam\" style=\"font-family:'Noto Serif Bengali',serif;font-size:13.5pt;direction:ltr\">২য় সাময়িক পরীক্ষা — ১৪৪৮ হিঃ / ২০২৬ ইং</span></div>\n<div class=\"meta\" style=\"font-family:'Noto Serif Bengali',serif;font-size:13pt;direction:ltr\"><span>মারহালা : নাহবেমীর</span><span>কিতাব : আল ফিকহুল মুয়াসসার</span><span>পূর্ণমান : ১০০</span></div>\n<div class=\"sl\" style=\"direction:rtl;font-family:'Noto Serif Bengali',serif\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n\n<div class=\"qt\">السؤال الأول :-</div>\n<div class=\"pt\"><div class=\"t\">(الف) كم شرطا لصحة صلاة الجمعة ؟ اذكرها اختصرا.</div><div class=\"m\">١٠</div></div>\n<div class=\"pt\"><div class=\"t\">(الباء) ترجم العبارة بعد التشكيل :-<div class=\"ps\">يجب السعي وترك البيع بالاذان الاول. اذا اخرج الامام للخطبة فلا تجوز صلاة لا كلام ، فلا يرد سلاما ولا يشمت عاطسا حتى يفرغ من الصلاة. يكره ان يطول الخطبه. يكره للخطيب ان يترك شيئا من سنن الخطبه. يكره الاكل والشرب والعبث والالتفات للذي حضر الخطبه.</div></div><div class=\"m\">١٣</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) متى يجب سجود التلاوه؟</div><div class=\"m\">١٠</div></div>\n\n<div class=\"qt\">السؤال الثاني :-</div>\n<div class=\"pt\"><div class=\"t\">(الف) ما حكم من ترك واجبا من واجبة الصلاه عامدا؟</div><div class=\"m\">١٠</div></div>\n<div class=\"pt\"><div class=\"t\">(الباء) متى يجب على المريض ان يوصي وليه باداء الصلاة الفائته ؟</div><div class=\"m\">١٣</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) اذا كان القول صحيحا قل صحيح واذا خطا خطا ثم صحح الخطا:-<div>(١) يخرج الولي الفديه من ثلثي الميراث؟</div><div>(٢) الترتيب واجب بين النوافل والوتر ؟</div><div>(٣) مرض صهيب فجاز له ترك الصلاة حتى يصح من مرضه ؟</div></div><div class=\"m\">١٠</div></div>\n\n<div class=\"qt\">السؤال الثالث :-</div>\n<div class=\"pt\"><div class=\"t\">(الف) ما معنى القصر هل يجوز القصر اذا لم تتجاوز عمران قريتك ؟</div><div class=\"m\">١١</div></div>\n<div class=\"pt\"><div class=\"t\">(الباء) ماذا قال الله تعالى عن صلاة المسافر وماذا قال النبي صلى الله عليه وسلم اكتب بالعربية ؟</div><div class=\"m\">١١</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) اذكر ستة من مواضع الكراهة في الامامة والجماعة؟</div><div class=\"m\">١١</div></div>\n\n<div class=\"qt\">السؤال الرابع :-</div>\n<div class=\"pt\"><div class=\"t\">(الف) عرف الجماعة وكيف تنعقد الجماعة ؟</div><div class=\"m\">٨</div></div>\n<div class=\"pt\"><div class=\"t\">(الباء) اذكر عشر مفسدات من مفسدات الصلاه ؟</div><div class=\"m\">١٠</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) كم امرا يجب في الصلاة ؟ اذكر ثمانية منها.</div><div class=\"m\">٨</div></div>\n<div class=\"pt\"><div class=\"t\">(د) شكل و ترجم العبارة الاتية:<div class=\"ps\">الذي لا يجد شيئا يزيل به النجاسة يصلي مع النجاسة ولا يعيد الصلاة الذي لا يجد ثوبا يستر به عورتة وكذا لا يجد حشيشا اوطينا عريانا ولا يعيد الصلاة.</div></div><div class=\"m\">٧</div></div>\n<div class=\"end\">— انتهت الأسئلة —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-5", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — কুরআন অনুবাদ ৮ম", "lang": "ar", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — কুরআন অনুবাদ ৮ম</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Amiri','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:14pt;line-height:1.85}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head p{margin:0;font-size:12pt}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 12px;break-inside:avoid;page-break-inside:avoid}\n.q .n{font-weight:700;text-decoration:underline;text-underline-offset:4px}\n.sub{margin:3px 0 3px 1.4em}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .meta{font-size:15pt}\n.ar .head h1{font-size:22pt}\n.vs{margin:0 0 4px;text-align:center}\n.pt{margin:0 0 4px;break-inside:avoid}\n.ari{direction:rtl;unicode-bidi:isolate;font-family:'Amiri','Noto Naskh Arabic',serif;font-size:16pt}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p1 ar\" dir=\"rtl\" lang=\"ar\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><h1>المدرسة الإسلامية الحسينية حُسَينِيَّا مَدْرَسَة</h1><span class=\"exam\">الاختبار الثانى - ١٤٤٨ هـ / ٢٠٢٦ م</span></div>\n<div class=\"meta\"><span>المرحلة : المتوسطة</span><span>الصف : الثامن</span></div>\n<div class=\"meta\"><span>المادة : ترجمة القرآن</span><span>الكتاب : القرآن الكريم</span></div>\n<div class=\"meta\"><span>الرقم الكامل : ١٠٠ <span style=\"font-weight:400;font-size:14pt\">— والأربعة منها لحسن الكتابة وجودة الأسلوب</span></span><span>الوقت : ثلاث ساعات</span></div>\n<div class=\"sl\" style=\"direction:rtl;font-family:'Noto Serif Bengali',serif\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n<div class=\"ins\" style=\"font-size:17pt\">★ أجب عن الكل ★</div>\n\n<div class=\"qt\">السؤال الأول:</div>\n<div class=\"vs\">يُسَبِّحُ لِلَّهِ مَا فِي السَّمَاوَاتِ وَمَا فِي الْأَرْضِ الْمَلِكِ الْقُدُّوسِ الْعَزِيزِ الْحَكِيمِ ۝</div>\n<div class=\"vs\">هُوَ الَّذِي بَعَثَ فِي الْأُمِّيِّينَ رَسُولًا مِّنْهُمْ يَتْلُو عَلَيْهِمْ آيَاتِهِ وَيُزَكِّيهِمْ وَيُعَلِّمُهُمُ الْكِتَابَ وَالْحِكْمَةَ وَإِن كَانُوا مِن قَبْلُ لَفِي ضَلَالٍ مُّبِينٍ ۝</div>\n<div class=\"vs\">وَآخَرِينَ مِنْهُمْ لَمَّا يَلْحَقُوا بِهِمْ ۚ وَهُوَ الْعَزِيزُ الْحَكِيمُ ۝</div>\n<div class=\"vs\">ذَٰلِكَ فَضْلُ اللَّهِ يُؤْتِيهِ مَن يَشَاءُ ۚ وَاللَّهُ ذُو الْفَضْلِ الْعَظِيمِ ۝</div>\n<div class=\"pt\">(الف) ترجم الاتية الكريمة.</div>\n<div class=\"pt\">(الباء) مَا الْمَوْضُوعَاتُ هَذِهِ السُّورَة؟ اُكْتُبْ مُخْتَصَرًا.</div>\n<div class=\"pt\">(ج) هَلْ يَجُوزُ تَمَنِّي الْمَوْتِ؟ اُكْتُبْ مُخْتَصَرًا.</div>\n\n<div class=\"qt\">السؤال الثاني:</div>\n<div class=\"vs\">إِذَا جَاءَكَ الْمُنَافِقُونَ قَالُوا نَشْهَدُ إِنَّكَ لَرَسُولُ اللَّهِ ۗ وَاللَّهُ يَعْلَمُ إِنَّكَ لَرَسُولُهُ وَاللَّهُ يَشْهَدُ إِنَّ الْمُنَافِقِينَ لَكَاذِبُونَ ۝</div>\n<div class=\"vs\">اتَّخَذُوا أَيْمَانَهُمْ جُنَّةً فَصَدُّوا عَنْ سَبِيلِ اللَّهِ ۚ إِنَّهُمْ سَاءَ مَا كَانُوا يَعْمَلُونَ ۝</div>\n<div class=\"vs\">ذَٰلِكَ بِأَنَّهُمْ آمَنُوا ثُمَّ كَفَرُوا فَطُبِعَ عَلَىٰ قُلُوبِهِمْ فَهُمْ لَا يَفْقَهُونَ ۝</div>\n<div class=\"vs\">وَإِذَا رَأَيْتَهُمْ تُعْجِبُكَ أَجْسَامُهُمْ ۖ وَإِن يَقُولُوا تَسْمَعْ لِقَوْلِهِمْ ۖ كَأَنَّهُمْ خُشُبٌ مُّسَنَّدَةٌ ۖ يَحْسَبُونَ كُلَّ صَيْحَةٍ عَلَيْهِمْ ۚ هُمُ الْعَدُوُّ فَاحْذَرْهُمْ ۚ قَاتَلَهُمُ اللَّهُ ۖ أَنَّىٰ يُؤْفَكُونَ ۝</div>\n<div class=\"pt\">(الف) ترجم الاتية الكريمة.</div>\n<div class=\"pt\">(الباء) مَا الْمَوْضُوعَاتُ هَذِهِ السُّورَة؟ اُكْتُبْ مُخْتَصَرًا.</div>\n<div class=\"end\">— انتهت الأسئلة —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-6", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — উসূলে ফিকাহ", "lang": "bn", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — উসূলে ফিকাহ</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Amiri','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:14pt;line-height:1.85}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head p{margin:0;font-size:12pt}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 12px;break-inside:avoid;page-break-inside:avoid}\n.q .n{font-weight:700;text-decoration:underline;text-underline-offset:4px}\n.sub{margin:3px 0 3px 1.4em}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .meta{font-size:15pt}\n.ar .head h1{font-size:22pt}\n.vs{margin:0 0 4px;text-align:center}\n.pt{margin:0 0 4px;break-inside:avoid}\n.ari{direction:rtl;unicode-bidi:isolate;font-family:'Amiri','Noto Naskh Arabic',serif;font-size:16pt}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p2\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><h1>বোররচর কাচারি বাজার ইসলামিয়া হুসেইনিয়া মাদ্রাসা</h1><p>বোররচর কাচারি বাজার, সদর, ময়মনসিংহ</p><span class=\"exam\">২য় সাময়িক পরীক্ষা — ২০২৬ ইং</span></div>\n<div class=\"meta\"><span>বিষয় : উসূলে ফিকাহ ও মানতিক</span><span>জামাত : হেদায়াতুন্নহু</span></div>\n<div class=\"meta\"><span>পূর্ণমান : ১০০</span><span>সময় : ৩ :০০</span></div>\n<div class=\"sl\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n<div class=\"ins\">(যে কোন ৪ টি প্রশ্নের উত্তর দাও)</div>\n\n<div class=\"q\"><div class=\"n\">১. প্রশ্ন :</div>\n<div class=\"sub\">(ক) <span class=\"ari\">الاجماع</span> শাব্দিক ও আভিধানিক অর্থ লিখ।</div>\n<div class=\"sub\">(খ) পরিচয় লিখ: <span class=\"ari\">ركن الاجماع و شرطه،اهل الاجماع،حقيقة الاجمع،اصل الاجماع،حكم الاجماع</span>.</div>\n<div class=\"sub\">(গ) <span class=\"ari\">احد،مشهور،متواتر</span> এর পরিচয় লিখ <span class=\"ari\">حكم</span> সহ।</div></div>\n\n<div class=\"q\"><div class=\"n\">২. প্রশ্ন :</div>\n<div class=\"sub\">(ক) <span class=\"ari\">خبر متواتر</span> এর পরিচয় লিখ <span class=\"ari\">حكم</span> সহ।</div>\n<div class=\"sub\">(খ) <span class=\"ari\">اسنة</span> শাব্দিক ও আভিধানিক অর্থ লিখ।</div>\n<div class=\"sub\">(গ) <span class=\"ari\">السند، المتن،المسند،المسل</span> পরিচয় বুঝিয়ে লিখ।</div></div>\n\n<div class=\"q\"><div class=\"n\">৩. প্রশ্ন :</div>\n<div class=\"sub\">(ক) <span class=\"ari\">عبارة النص</span> ও <span class=\"ari\">اشارة النص</span> কাকে বলে? <span class=\"ari\">حكم</span> সহ লিখ।</div>\n<div class=\"sub\">(খ) উদাহরণ সহ <span class=\"ari\">الحيقة</span> ও <span class=\"ari\">المجاز</span> এর পরিচয় লিখ <span class=\"ari\">حكم</span> সহ ।</div>\n<div class=\"sub\">(গ) <span class=\"ari\">منطق</span> এর <span class=\"ari\">غرض</span> ও <span class=\"ari\">موضوع</span> লিখ।</div></div>\n\n<div class=\"q\"><div class=\"n\">৪. প্রশ্ন :</div>\n<div class=\"sub\">(ক) <span class=\"ari\">ضلالت</span> এর পরিচয় লিখে তা কত প্রকার লিখ।</div>\n<div class=\"sub\">(খ) <span class=\"ari\">ضلالت لفظيه</span> কাকে বলে? তা কত প্রকার ও কি কি লিখ।</div>\n<div class=\"sub\">(গ) <span class=\"ari\">ضلالت غير لفظيه</span> এর পরিচয় লিখ উদাহরণ সহ।</div></div>\n\n<div class=\"q\"><div class=\"n\">৫. প্রশ্ন :</div>\n<div class=\"sub\">(ক) <span class=\"ari\">قضيه شرطيه</span> এর পরিচয় লিখ তোমার কিতাব অনুযায়ী।</div>\n<div class=\"sub\">(খ) <span class=\"ari\">شرطيه متصله</span> পরিচয় উদাহরণ সহ লিখ।</div>\n<div class=\"sub\">(গ) <span class=\"ari\">شرطيه متصله</span> কত প্রকার ও কি কি পরিচয় সহ লিখ।</div></div>\n<div class=\"end\">— সমাপ্ত —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-7", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — আরবি (বিশেষ)", "lang": "bn", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — আরবি (বিশেষ)</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:13pt;line-height:1.6}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px;font-weight:600;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0 2px}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.q{margin:9px 0 0;break-inside:avoid;page-break-inside:avoid}\n.qh{display:flex;justify-content:space-between;gap:10px;font-weight:700;break-after:avoid}\n.qh .m{white-space:nowrap}\n.g{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px;padding-left:.2em}\n.g:has(.a){direction:rtl}\n.g.c2{grid-template-columns:1fr 1fr}\n.g.c1{grid-template-columns:1fr}\n.g div{display:flex;gap:.5em;align-items:baseline}\n.a{font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16.5pt;direction:rtl;unicode-bidi:isolate;line-height:1.9}\n.para{direction:rtl;text-align:right;font-family:'Amiri','Noto Naskh Arabic',serif;font-size:16.5pt;line-height:2.1;margin:2px 0}\n.bl{display:inline-block;min-width:90px;border-bottom:1.2px solid #000}\n.end{text-align:center;font-weight:700;margin-top:10px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper\" contenteditable=\"true\" spellcheck=\"false\">\n\n<div class=\"head\"><h1>বোররচর কাচারী বাজার ইসলামিয়া হুসাইনিয়া মাদ্রাসা</h1><span class=\"exam\">দ্বিতীয় সাময়িক পরীক্ষা — ২০২৬ ইং</span></div>\n<div class=\"meta\"><span>কিতাব: এসো আরবি শিখি — প্রথম খণ্ড</span><span>মারহালা: ইবতেদাইয়্যাহ</span><span>জামাত: বিশেষ জামাত</span></div>\n<div class=\"meta\"><span>বিষয়: আরবি</span><span>সময়: ৩ ঘণ্টা</span><span>পূর্ণমান: ১০০</span></div>\n<div class=\"sl\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n\n<div class=\"q\"><div class=\"qh\"><span>১। নিচের আরবি শব্দগুলোর বাংলা অর্থ লেখো। (যেকোনো ১০টি)</span><span class=\"m\">১০</span></div>\n<div class=\"g\"><div>১. <span class=\"a\">طَازَجٌ</span></div><div>২. <span class=\"a\">خَالِصٌ</span></div><div>৩. <span class=\"a\">سَمَكَةٌ</span></div><div>৪. <span class=\"a\">لَبَنٌ</span></div><div>৫. <span class=\"a\">عَسَلٌ</span></div><div>৬. <span class=\"a\">طَبِيبٌ</span></div><div>৭. <span class=\"a\">أَمِينٌ</span></div><div>৮. <span class=\"a\">كَاتِبٌ</span></div><div>৯. <span class=\"a\">نَشِيطٌ</span></div><div>১০. <span class=\"a\">مَشْهُورٌ</span></div><div>১১. <span class=\"a\">مَدِينَةٌ</span></div><div>১২. <span class=\"a\">قَرْيَةٌ</span></div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>২। নিচের বাংলা শব্দগুলোর আরবি লেখো। (যেকোনো ১০টি)</span><span class=\"m\">১০</span></div>\n<div class=\"g\"><div>১. একটি মাছ</div><div>২. দুধ</div><div>৩. মধু</div><div>৪. চিকিৎসক</div><div>৫. লেখক</div><div>৬. বিশ্বস্ত</div><div>৭. উদ্যমী</div><div>৮. একটি শহর</div><div>৯. একটি গ্রাম</div><div>১০. একটি পথ</div><div>১১. একটি দৃশ্য</div><div>১২. একটি বাজার</div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৩। নিচের আরবি বাক্যগুলোর বাংলা অনুবাদ করো। (যেকোনো ৫টি)</span><span class=\"m\">১০</span></div>\n<div class=\"g c2\"><div>১. <span class=\"a\">هٰذَا قَلَمُ مَحْمُودٍ.</span></div><div>২. <span class=\"a\">هٰذِهِ سَاعَةُ بَشِيرٍ جَمِيلَةٌ.</span></div><div>৩. <span class=\"a\">هٰذَا عِقْدُ آمِنَةَ جَمِيلٌ.</span></div><div>৪. <span class=\"a\">هُوَ رَجُلٌ طَيِّبٌ.</span></div><div>৫. <span class=\"a\">هٰذَا مَسْجِدٌ كَبِيرٌ.</span></div><div>৬. <span class=\"a\">هٰذَا مَنْظَرُ الْقَرْيَةِ.</span></div><div>৭. <span class=\"a\">سُوقُ الْمَدِينَةِ كَبِيرٌ.</span></div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৪। নিচের বাংলা বাক্যগুলোর আরবি অনুবাদ করো। (যেকোনো ৫টি)</span><span class=\"m\">১০</span></div>\n<div class=\"g c2\"><div>১. এটি মাহমুদের কলম।</div><div>২. এটি একটি বড় মসজিদ।</div><div>৩. এই গ্রামটি সুন্দর ও পরিষ্কার।</div><div>৪. তুমি একজন ভালো মানুষ।</div><div>৫. শহরের বাজারটি বড়।</div><div>৬. গ্রামের দৃশ্যটি খুব সুন্দর।</div><div>৭. এই পথটি প্রশস্ত।</div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৫। নিচের প্রশ্নগুলোর আরবিতে উত্তর দাও। (যেকোনো ৫টি)</span><span class=\"m\">১৫</span></div>\n<div class=\"g c2\"><div>১. <span class=\"a\">مَنْ أَنْتَ أَيُّهَا الرَّجُلُ؟</span></div><div>২. <span class=\"a\">هَلْ أَنْتَ إِمَامُ الْمَسْجِدِ؟</span></div><div>৩. <span class=\"a\">هَلْ هٰذَا قَلَمُ خَالِدٍ؟</span></div><div>৪. <span class=\"a\">كَيْفَ قَلَمُ خَالِدٍ؟</span></div><div>৫. <span class=\"a\">هَلْ بَابُ الْبَيْتِ مَفْتُوحٌ؟</span></div><div>৬. <span class=\"a\">كَيْفَ مَنْظَرُ الْقَرْيَةِ؟</span></div><div>৭. <span class=\"a\">مَاذَا فِي يَدِ زَيْنَبَ؟</span></div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৬। নিচের শব্দগুলো দিয়ে আরবি বাক্য তৈরি করো। (যেকোনো ৫টি)</span><span class=\"m\">১০</span></div>\n<div class=\"g\" style=\"grid-template-columns:repeat(4,1fr)\"><div>১. <span class=\"a\">مَدِينَةٌ</span></div><div>২. <span class=\"a\">قَرْيَةٌ</span></div><div>৩. <span class=\"a\">طَبِيبٌ</span></div><div>৪. <span class=\"a\">كَاتِبٌ</span></div><div>৫. <span class=\"a\">مَسْجِدٌ</span></div><div>৬. <span class=\"a\">سَمَكَةٌ</span></div><div>৭. <span class=\"a\">عَسَلٌ</span></div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৭। নিচের শব্দগুলোর বিপরীত শব্দ লেখো। (যেকোনো ৫টি)</span><span class=\"m\">১০</span></div>\n<div class=\"g\" style=\"grid-template-columns:repeat(4,1fr)\"><div>১. <span class=\"a\">طَوِيلٌ</span></div><div>২. <span class=\"a\">طَازَجٌ</span></div><div>৩. <span class=\"a\">نَشِيطٌ</span></div><div>৪. <span class=\"a\">مَشْهُورٌ</span></div><div>৫. <span class=\"a\">كَبِيرٌ</span></div><div>৬. <span class=\"a\">جَمِيلٌ</span></div><div>৭. <span class=\"a\">سَرِيعٌ</span></div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৮। নিচের অনুচ্ছেদটি বাংলা অনুবাদ করো।</span><span class=\"m\">১০</span></div>\n<div class=\"para\">هٰذَا مَنْظَرُ الْقَرْيَةِ. مَنْظَرُ الْقَرْيَةِ جَمِيلٌ جِدًّا. سُوقُ الْقَرْيَةِ صَغِيرٌ وَسُوقُ الْمَدِينَةِ كَبِيرٌ. هٰذَا الطَّرِيقُ وَاسِعٌ وَذٰلِكَ الطَّرِيقُ ضَيِّقٌ.</div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>৯। নিচের বাক্যগুলোতে শূন্যস্থান পূরণ করো।</span><span class=\"m\">৫</span></div>\n<div class=\"g c2\">\n<div>১. <span class=\"a\">هٰذَا قَلَمُ <span class=\"bl\"></span></span></div>\n<div>২. <span class=\"a\">هٰذَا مَسْجِدٌ <span class=\"bl\"></span>.</span></div>\n<div>৩. <span class=\"a\">هٰذِهِ قَرْيَةٌ جَمِيلَةٌ وَ <span class=\"bl\"></span>.</span></div>\n<div>৪. <span class=\"a\">هٰذَا قِطَارٌ <span class=\"bl\"></span>.</span></div>\n<div>৫. <span class=\"a\">سُوقُ الْمَدِينَةِ <span class=\"bl\"></span>.</span></div></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>১০। নিচের যেকোনো একটি বিষয় সম্পর্কে আরবিতে পাঁচটি বাক্য লেখো।</span><span class=\"m\">১০</span></div>\n<div class=\"g\" style=\"grid-template-columns:repeat(3,auto);justify-content:start;gap:0 36px\"><div>ক. <span class=\"a\">الْمَسْجِدُ</span></div><div>খ. <span class=\"a\">الْمَدْرَسَةُ</span></div><div>গ. <span class=\"a\">الْقَرْيَةُ</span> — গ্রাম</div></div></div>\n\n<div class=\"end\">— সমাপ্ত —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-8", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — আদব ৮ম", "lang": "ar", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — আদব ৮ম</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Amiri','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:13.5pt;line-height:1.75}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head .sa{font-family:'Amiri',serif;font-size:15pt;direction:rtl;margin:0;line-height:1.7}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 10px;break-inside:avoid;page-break-inside:avoid}\n.qh{display:flex;justify-content:space-between;gap:10px;font-weight:700}\n.qh .m{white-space:nowrap}\n.sub{display:flex;justify-content:space-between;gap:10px;margin:3px 0 3px 1em}\n.sub .m{font-weight:700;white-space:nowrap}\n.al{direction:rtl;text-align:right;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;margin:2px 0 4px 1em}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .head h1{font-size:22pt}\n.ar .meta{font-size:15pt}\n.ar .ps{text-align:justify;margin:2px 0 4px}\n.pt{display:flex;justify-content:space-between;gap:12px;margin:0 0 4px;break-inside:avoid}\n.pt .t{flex:1}\n.pt .m{font-weight:700;border:1px solid #000;border-radius:6px;padding:0 8px;line-height:1.7;min-width:2em;text-align:center;align-self:flex-start}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p1 ar\" dir=\"rtl\" lang=\"ar\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><h1 style=\"font-size:18pt\">المدرسة الإسلامية الحسينية، بوررصر، كجاري بازار، صدر، مومن شاهي</h1><span class=\"exam\">الاختبار الثاني - ١٤٤٨ هـ / ٢٠٢٦ م</span></div>\n<div class=\"meta\"><span>المرحلة : المتوسطة</span><span>الصف : الثامن</span></div>\n<div class=\"meta\"><span>المادة : علم الأدب</span><span>الكتاب : قصص النبيين ٢</span></div>\n<div class=\"meta\"><span>الرقم الكامل : ١٠٠ <span style=\"font-weight:400;font-size:14pt\">— والأربعة منها لحسن الكتابة وجودة الأسلوب</span></span><span>الوقت : ثلاث ساعات</span></div>\n<div class=\"sl\" style=\"direction:rtl;font-family:'Noto Serif Bengali',serif\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n<div class=\"ins\" style=\"font-size:17pt\">★ أجب عن ثلاثة أسئلة ★</div>\n\n<div class=\"qt\">السؤال الأول:</div>\n<div class=\"ps\">بارك الله في ذرية آدم، فكان فيها رجال كثير ونساء، وانتشرت ذرية آدم وكثرت،  ورأى الشيطان أن يدعو الناس إلى عبادة الأصنام، فيدخلوا النار ولا يدخلوا الجنة أبدا، وكان الشيطان أن الله لا يغفر الشرك ويغفر كل شيء إذا أراد.</div>\n<div class=\"pt\"><div class=\"t\">(ا) ترجم العبارة المذكورة بعد التشكيل.</div><div class=\"m\">٢٠</div></div>\n<div class=\"pt\"><div class=\"t\">(ب) ماذا رأى الشيطان؟</div><div class=\"m\">٦</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) كيف كان الرجال؟ وماذا كان يفعل الناس؟</div><div class=\"m\">٦</div></div>\n\n<div class=\"qt\">السؤال الثاني:</div>\n<div class=\"ps\">ودعا نوح قومه واجتهد في النصيحة، قال: يا قوم! إني لكم نذير مبين، أن اعبدوا الله واتقوه وأطيعون، يغفر لكم من ذنوبكم ويؤخركم إلى أجل مسمى.</div>\n<div class=\"pt\"><div class=\"t\">(ا) ترجم العبارة المذكورة بعد التشكيل.</div><div class=\"m\">٢٠</div></div>\n<div class=\"pt\"><div class=\"t\">(ب) ماذا قال نوح لقومه؟</div><div class=\"m\">٦</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) ماذا فعل قوم نوح لما دعاهم نوح إلى الله ؟</div><div class=\"m\">٦</div></div>\n<div style=\"text-align:center;font-weight:700\">زاد الطالبين</div>\n\n<div class=\"qt\">السؤال الثالث:</div>\n<div class=\"ps\">الدين النصيحة، المجالس بالأمانة، الدعاء مخ العبادة، الحياء شعبة من الإيمان، المرء مع من أحب، الخمر جماع الإثم، الإناة من الله والعجلة من الشيطان.</div>\n<div class=\"pt\"><div class=\"t\">(ا) ترجم الأحاديث المذكورة بعد التشكيل.</div><div class=\"m\">٢٠</div></div>\n<div class=\"pt\"><div class=\"t\">(ب) أوضح الحديثين الأولين.</div><div class=\"m\">٦</div></div>\n<div class=\"pt\"><div class=\"t\">(ج) اكتب خمسة أحاديث من حفظك.</div><div class=\"m\">٦</div></div>\n<div class=\"end\">— انتهت الأسئلة —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-9", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — দ্বীনিয়্যাত", "lang": "bn", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — দ্বীনিয়্যাত</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Amiri','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:13.5pt;line-height:1.75}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head .sa{font-family:'Amiri',serif;font-size:15pt;direction:rtl;margin:0;line-height:1.7}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 10px;break-inside:avoid;page-break-inside:avoid}\n.qh{display:flex;justify-content:space-between;gap:10px;font-weight:700}\n.qh .m{white-space:nowrap}\n.sub{display:flex;justify-content:space-between;gap:10px;margin:3px 0 3px 1em}\n.sub .m{font-weight:700;white-space:nowrap}\n.al{direction:rtl;text-align:right;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;margin:2px 0 4px 1em}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .head h1{font-size:22pt}\n.ar .meta{font-size:15pt}\n.ar .ps{text-align:justify;margin:2px 0 4px}\n.pt{display:flex;justify-content:space-between;gap:12px;margin:0 0 4px;break-inside:avoid}\n.pt .t{flex:1}\n.pt .m{font-weight:700;border:1px solid #000;border-radius:6px;padding:0 8px;line-height:1.7;min-width:2em;text-align:center;align-self:flex-start}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p2\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><p class=\"sa\">المدرسة الإسلامية الحسينية، بوررصر، كجاري بازار، صدر، مومن شاهي</p><h1>বোররচর কাচারী বাজার ইসলামিয়া হুসাইনিয়া মাদ্রাসা</h1><span class=\"exam\">২য় সাময়িক পরীক্ষা - ১৪৪৮ হিঃ / ২০২৬ ইং</span></div>\n<div class=\"meta\"><span>জামাতঃ তাইসির</span><span>বিষয়ঃ দ্বীনিয়্যাত</span></div>\n<div class=\"meta\"><span>কিতাবঃ তা’লীমুল ইসলাম ৪খন্ড</span><span>সময়ঃ ৩.০০ ঘন্টা</span></div>\n<div class=\"meta\"><span>পূর্ণমানঃ- ১০০</span><span>সুন্দর লিখার জন্য - ৪</span></div>\n<div class=\"sl\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n<div class=\"ins\">( যে কোন ৮ প্রশ্নের উত্তর দাও)</div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ১। শাফা’আত দ্বারা কী উদ্দেশ্য?</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ২। আ’মালে ছালেহা কাকে বলে? আ’মালে ছালেহা ঈমানের তাৎপর্যের অন্তর্ভুক্ত কি?</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৩। বিদআত কাকে বলে? এবং এ সম্পর্কে নবী করিম (সাঃ) কী বলেছেন?</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৪। কুরআন শরীফ নাযিল হওয়ার শুরু কোথায় হয়েছিল?</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৫। জামাআতে নামাজ পড়ার উপকারিতা কী কী?</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৬। ইমামতের যোগ্য কে? কিতাব অনুযায়ী লিখ।</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৭। নামাজ ভাঙ্গের কারণসমূহ হতে ১২ টি লেখ।</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৮। তারাবীহ এর নামাজের সময় কখন? কিতাব অনুযায়ী লেখ।</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৯। লাহেকের ছুটে যাওয়া নামাজ কখন, কিভাবে পড়বে?</span><span class=\"m\">১২</span></div></div>\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ১০। ক্বিরাআতে কি কি পরিবর্তনের কারণে সাহু সিজদা ওয়াজিব হয়?</span><span class=\"m\">১২</span></div></div>\n<div class=\"end\">— সমাপ্ত —</div>\n</div></div>\n</body></html>"}, {"id": "seed2-10", "title": "২য় সাময়িক পরীক্ষা ২০২৬ — আরবি আদব (মিযান)", "lang": "bn", "html": "<!DOCTYPE html>\n<html lang=\"bn\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>২য় সাময়িক পরীক্ষা ২০২৬ — আরবি আদব (মিযান)</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n*{box-sizing:border-box}\nbody{display:block;font-family:'Noto Serif Bengali','Amiri','Kalpurush','Nirmala UI',serif;color:#000}\n.paper{background:#fff;color:#000;width:210mm;min-height:297mm;margin:0 auto 16px;padding:13mm 15mm;box-shadow:0 2px 12px rgba(0,0,0,.25);font-size:13.5pt;line-height:1.75}\n.head{text-align:center;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px}\n.head h1{font-size:19pt;margin:0;line-height:1.4;font-weight:700}\n.head .sa{font-family:'Amiri',serif;font-size:15pt;direction:rtl;margin:0;line-height:1.7}\n.exam{display:inline-block;margin-top:4px;padding:0 18px;border:1.5px solid #000;border-radius:20px;font-weight:700}\n.meta{display:flex;justify-content:space-between;gap:8px;font-weight:700;padding:3px 0;border-bottom:1px solid #000}\n.sl{display:flex;gap:10px;font-size:12pt;padding:5px 0}\n.sl i{flex:1;border-bottom:1px dotted #000}\n.ins{text-align:center;font-weight:700;margin:6px 0 8px}\n.q{margin:0 0 10px;break-inside:avoid;page-break-inside:avoid}\n.qh{display:flex;justify-content:space-between;gap:10px;font-weight:700}\n.qh .m{white-space:nowrap}\n.sub{display:flex;justify-content:space-between;gap:10px;margin:3px 0 3px 1em}\n.sub .m{font-weight:700;white-space:nowrap}\n.al{direction:rtl;text-align:right;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;margin:2px 0 4px 1em}\n.ar{direction:rtl;font-family:'Amiri','Noto Naskh Arabic','Traditional Arabic',serif;font-size:16pt;line-height:2;text-align:right}\n.ar .qt{font-weight:700;font-size:18pt;text-decoration:underline;text-underline-offset:5px;margin:8px 0 2px;break-after:avoid}\n.ar .head h1{font-size:22pt}\n.ar .meta{font-size:15pt}\n.ar .ps{text-align:justify;margin:2px 0 4px}\n.pt{display:flex;justify-content:space-between;gap:12px;margin:0 0 4px;break-inside:avoid}\n.pt .t{flex:1}\n.pt .m{font-weight:700;border:1px solid #000;border-radius:6px;padding:0 8px;line-height:1.7;min-width:2em;text-align:center;align-self:flex-start}\n.end{text-align:center;font-weight:700;margin-top:8px}\n@media print{.paper{box-shadow:none;margin:0;width:auto;min-height:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\nhtml,body{background:#e9e9e6;margin:0}\n.wrap{overflow-x:auto;padding:10px}\n.toolbar{position:sticky;top:0;z-index:5;background:#fff;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;align-items:center;font:14px sans-serif;color:#222}\n.toolbar button{background:#1f6f43;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}\n.paper:focus{outline:none}\n@page{size:A4;margin:10mm}\n@media print{html,body{background:#fff}.toolbar{display:none!important}.wrap{padding:0;overflow:visible}.paper{box-shadow:none!important;margin:0!important}}\n</style></head><body>\n<div class=\"toolbar\"><button onclick=\"window.print()\">🖨️ প্রিন্ট</button><span>প্রিন্টের আগে লেখায় চাপ দিয়ে সম্পাদনা করা যায়</span></div>\n<div class=\"wrap\"><div contenteditable=\"true\" class=\"paper p3\" contenteditable=\"true\" spellcheck=\"false\">\n<div class=\"head\"><p class=\"sa\">المدرسة الإسلامية الحسينية، بوررصر، كجاري بازار، صدر، مومن شاهي</p><h1>বোররচর কাচারী বাজার ইসলামিয়া হুসাইনিয়া মাদ্রাসা</h1><span class=\"exam\">২য় সাময়িক পরীক্ষা - ১৪৪৮ হিঃ / ২০২৬ ইং</span></div>\n<div class=\"meta\"><span>জামাতঃ মিযান</span><span>বিষয়ঃ আরবি আদব</span></div>\n<div class=\"meta\"><span>কিতাবঃ এসো আরবি শিখি ও সফওয়াতুল মাসাদির</span><span>সময়ঃ ৩.০০ ঘন্টা</span></div>\n<div class=\"meta\"><span>পূর্ণমানঃ- ১০০</span><span>সুন্দর লিখার জন্য - ৪</span></div>\n<div class=\"sl\"><span>নাম :</span><i></i><span>রোল :</span><i style=\"max-width:70px\"></i><span>তারিখ :</span><i style=\"max-width:110px\"></i></div>\n\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ১।</span></div>\n<div class=\"sub\"><span>(ক) শব্দগুলোর অর্থ লেখ।</span><span class=\"m\">১২</span></div>\n<div class=\"al\">بطيئ، منضدة، بطيخة، حصن، فنجان، بائت، قطار، غصن، نشيط، سائق، غراب، أنف.</div>\n<div class=\"sub\"><span>(খ) শব্দগুলোর আরবি লেখ।</span><span class=\"m\">১২</span></div>\n<div class=\"sub\" style=\"display:block\">লাঙ্গল, ঘটনা, একটি বিমানবন্দর, একটি আঙুর, চুড়ি, একটি কামান, একটি চুলা, একটি মাছ, একটি বন, একটি কৌটা, একটি পত্রিকা, একটি বাঘ।</div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ২।</span></div>\n<div class=\"sub\"><span>(ক) আরবি কর এবং হরকত লাগাও।</span><span class=\"m\">১২</span></div>\n<div class=\"sub\" style=\"display:block\">আমার কাছে একটি ম্যাপ আছে, বিমানবন্দরে, রাশেদ ফাতেমার ভাই, এই আঙুর টক এবং ঐ আনার মিষ্টি, ইহা একটি ভাঙা নিমকদানি, লোকটি বিমানে আছে।</div>\n<div class=\"sub\"><span>(খ) বাক্যগুলোতে হরকাত লাগাও এবং বাংলা অর্থ লেখ।</span><span class=\"m\">১২</span></div>\n<div class=\"al\">المسجد بجانب المدرسة ، التاجر في الدكان، هذه قنبلة فاسدة، صديقي أخو ماجد، في قلب المؤمن نور و في قلب الكافر ظلم، ماجد سائق ماهر.</div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৩।</span></div>\n<div class=\"sub\"><span>(ক) ভুলগুলো ঠিক কর।</span><span class=\"m\">১২</span></div>\n<div class=\"al\">(١) هذه قطار بطيئة، (٢) أمام الدكانُ تاجر غنية، (٣) هذا المسطرة مكسور، (٤) ذلك التفاحة لذيذ جدا، (٥) ولدَ ماجد تلميذ ذكية، (٦) تلك الكتاب مفيدة.</div>\n<div class=\"sub\"><span>(খ) ছাত্র মাজেদ সম্পর্কে ১২ টা আরবি বাক্য লেখ বাংলা সহ।</span><span class=\"m\">১২</span></div></div>\n\n<div class=\"q\"><div class=\"qh\"><span>প্রশ্ন ৪।</span></div>\n<div class=\"sub\"><span>(ক) মাসদারগুলোর বাংলা অর্থ লেখ।</span><span class=\"m\">১২</span></div>\n<div class=\"al\">الانتقال، الاستفهام، الانقسام، الانفصال، الإبعاد، الإخبار، الإيقاظ، الإراحة، الانتخاب، الاحتراز، الغترار، الاهتمام.</div>\n<div class=\"sub\"><span>(খ) মাসদারগুলোর বাব উল্লেখ করে মাদ্দা লেখ।</span><span class=\"m\">১২</span></div>\n<div class=\"al\">الاقتران، الابتلال، الاستنصار، الاستخدام، الإرشاد، الإيصال،</div></div>\n<div class=\"end\">— সমাপ্ত —</div>\n</div></div>\n</body></html>"}];
+function seedReadyPapers(){
+  db.savedPapers = db.savedPapers || [];
+  const done = db.seededPaperIds = db.seededPaperIds || [];
+  let changed = false;
+  READY_PAPERS_SEED.concat(READY_PAPERS_SEED_2).forEach(sp => {
+    if(done.includes(sp.id)) return;
+    db.savedPapers.push({ id: sp.id, title: sp.title, lang: sp.lang, html: sp.html, builtin: true, created: todayISO() });
+    done.push(sp.id); changed = true;
+  });
+  if(changed) saveDB();
+}
+function savedPaperById(id){ return (db.savedPapers || []).find(p => p.id === id); }
+window.saveEditedPaper = function(id, html){
+  const p = savedPaperById(id);
+  if(!p) return false;
+  p.html = html; saveDB();
+  return true;
+};
+function openSavedPaper(id){
+  const p = savedPaperById(id);
+  if(!p) return;
+  const inject = `<button id="__appSave" type="button" style="position:fixed;right:12px;bottom:14px;z-index:99;background:#14432A;color:#fff;border:0;border-radius:24px;padding:11px 18px;font:600 15px sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.35);">💾 অ্যাপে সংরক্ষণ</button><style>@media print{#__appSave{display:none !important;}}</style>
+<script id="__appScript">(function(){var b=document.getElementById("__appSave");b.onclick=function(){try{var c=document.documentElement.cloneNode(true);["__appSave","__appScript"].forEach(function(i){var e=c.querySelector("#"+i);if(e)e.remove();});var st=c.querySelectorAll("style");st.forEach(function(s){if(s.textContent.indexOf("#__appSave")>-1)s.remove();});var ok=window.opener&&window.opener.saveEditedPaper(${JSON.stringify(id)},"<!DOCTYPE html>"+c.outerHTML);alert(ok?"সংরক্ষণ করা হয়েছে।":"সংরক্ষণ করা যায়নি — অ্যাপের উইন্ডো বন্ধ হয়ে গেছে।");}catch(e){alert("সংরক্ষণ করা যায়নি।");}};})();<\\/script>`;
+  const html = p.html.includes("</body>") ? p.html.replace("</body>", inject + "</body>") : p.html + inject;
+  const win = window.open("", "_blank");
+  if(!win){ alert("উইন্ডো খোলা যায়নি — পপ-আপ ব্লক করা থাকলে অনুমতি দিন।"); return; }
+  win.document.write(html);
+  win.document.close();
+}
+function paperTextOf(el){ return (el ? el.textContent : "").replace(/\s+/g, " ").trim(); }
+function paperToBlocks(html){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const root = doc.querySelector(".paper") || doc.body;
+  const rtlDoc = (((root.getAttribute && root.getAttribute("dir")) || "") + (doc.documentElement.getAttribute("dir") || "")).toLowerCase().indexOf("rtl") > -1;
+  let b = "";
+  const BLOCK = /^(DIV|P|H[1-6]|UL|OL|LI|TABLE|SECTION|HR|TEMPLATE)$/;
+  const isBlock = n => n.nodeType === 1 && BLOCK.test(n.tagName);
+  const clean = t => String(t || "").replace(/\s+/g, " ").trim();
+  const arRe = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/g;
+  const rtlOf = t => { const a = (t.match(arRe) || []).length, l = (t.match(/[A-Za-z\u0980-\u09FF]/g) || []).length; return rtlDoc || (a > 0 && a >= l); };
+  const P = (t, o) => { t = clean(t); if(!t) return; b += docPara(t, Object.assign({ rtl: rtlOf(t), align: "left" }, o || {})); };
+  const inlineText = el => {
+    let t = "";
+    el.childNodes.forEach(n => {
+      if(n.nodeType === 3){ t += n.nodeValue; return; }
+      if(n.nodeType !== 1 || isBlock(n)) return;
+      const c = n.classList;
+      if(c.contains("m") || c.contains("mark")) return;
+      if(n.tagName === "BR") t += " ";
+      else if(n.tagName === "I" && !clean(n.textContent)) t += " ............ ";
+      else t += inlineText(n);
+    });
+    return t;
+  };
+  const markOf = el => {
+    const m = [...el.children].find(c => c.classList && (c.classList.contains("m") || c.classList.contains("mark")));
+    const t = m ? clean(m.textContent).replace(/^\[|\]$/g, "").trim() : "";
+    return t ? "   [" + t + "]" : "";
+  };
+  const block = el => {
+    const c = el.classList, tag = el.tagName;
+    if(tag === "SCRIPT" || tag === "STYLE" || tag === "TEMPLATE" || tag === "HR" || c.contains("toolbar") || c.contains("fh-rule")) return;
+    if(c.contains("head")){
+      [...el.children].forEach(h => {
+        const t = clean(h.textContent); if(!t) return;
+        if(h.tagName === "H1") P(t, { align: "center", b: true, sz: 36, color: "14432A", after: 20 });
+        else if(h.classList.contains("exam")) P(t, { align: "center", b: true, sz: 26, border: true, after: 120 });
+        else P(t, { align: "center", sz: 22, after: 20 });
+      });
+      return;
+    }
+    if(c.contains("fh")){
+      P(clean((el.querySelector(".ar-brand") || {}).textContent), { align: "center", b: true, sz: 34, color: "14432A", rtl: true, after: 20 });
+      P(clean((el.querySelector(".fh-name") || {}).textContent), { align: "center", b: true, sz: 34, color: "14432A", after: 20 });
+      return;
+    }
+    if(c.contains("fh-title")){ P(el.textContent, { align: "center", b: true, sz: 28, border: true, after: 120 }); return; }
+    if(c.contains("meta")){ P([...el.children].map(s => clean(s.textContent)).filter(Boolean).join("      |      "), { sz: 24, after: 40 }); return; }
+    if(c.contains("studentline") || c.contains("sl")){
+      const parts = [];
+      [...el.children].forEach(s => { if(s.classList.contains("fill") || (s.tagName === "I" && !clean(s.textContent))) parts.push("............................"); else parts.push(clean(s.textContent)); });
+      P(parts.join(" "), { sz: 24, after: 80 }); return;
+    }
+    if(c.contains("instr") || c.contains("ins")){ P(el.textContent, { align: "center", b: true, sz: 28, before: 60, after: 120 }); return; }
+    if(c.contains("qt")){ P(el.textContent, { b: true, u: true, sz: 28, before: 140, after: 40 }); return; }
+    if(c.contains("end")){ P(el.textContent, { align: "center", b: true, before: 140 }); return; }
+    if(c.contains("vs")){ P(el.textContent, { align: "center", sz: 30, after: 40 }); return; }
+    if(c.contains("g")){ P([...el.children].map(x => clean(x.textContent)).filter(Boolean).join("      "), { sz: 26, after: 80 }); return; }
+    if(c.contains("ur")){
+      if(c.contains("words")) P([...el.querySelectorAll("span")].map(x => clean(x.textContent) || "........").join("      "), { rtl: true, sz: 28, after: 100 });
+      else P(el.textContent, { rtl: true, sz: 28, after: 100 });
+      return;
+    }
+    if(c.contains("sec")){
+      P(clean((el.querySelector(".st") || {}).textContent), { b: true, sz: 26, color: "14432A", before: 140, after: 60 });
+      [...el.children].filter(x => !x.classList.contains("st")).forEach(block);
+      return;
+    }
+    if(c.contains("part")){
+      const txt = el.querySelector(".txt");
+      if(txt){
+        const pass = txt.querySelector(".passage");
+        const clone = txt.cloneNode(true); const cp = clone.querySelector(".passage"); if(cp) cp.remove();
+        P(clean(clone.textContent) + (pass ? "" : markOf(el)), { sz: 26, after: 40 });
+        if(pass) P(pass.textContent + markOf(el), { sz: 26, after: 80, align: rtlDoc ? "left" : "both" });
+        return;
+      }
+    }
+    if(c.contains("qb")){
+      const subs = el.querySelectorAll(".sub");
+      if(subs.length) subs.forEach(x => P(x.textContent, { sz: 24, after: 40 }));
+      else P(inlineText(el), { sz: 24, after: 80 });
+      [...el.children].filter(isBlock).forEach(x => { if(!x.classList.contains("sub")) block(x); });
+      return;
+    }
+    if(c.contains("q") && el.querySelector(":scope > .t")){
+      const n = clean((el.querySelector(":scope > .n") || {}).textContent);
+      const t = el.querySelector(":scope > .t");
+      P(n + " " + clean(inlineText(t)) + markOf(el), { sz: 24, after: 40 });
+      const o = t.querySelector(".opts");
+      if(o) P([...o.children].map(x => clean(x.textContent)).join("      "), { sz: 22, after: 80 });
+      return;
+    }
+    const txt = clean(inlineText(el)), mk = markOf(el);
+    const hdr = c.contains("qh");
+    if(txt || mk) P(txt + mk, { sz: hdr ? 26 : 24, b: hdr, before: hdr ? 100 : 0, after: 60 });
+    [...el.children].filter(isBlock).forEach(block);
+  };
+  [...root.children].forEach(block);
+  return { blocks: b, rtl: rtlDoc };
+}
+function exportPaperWord(id){
+  const p = savedPaperById(id);
+  if(!p) return;
+  const r = paperToBlocks(p.html);
+  if(!r.blocks){ alert("এই প্রশ্নপত্র Word-এ রূপান্তর করা যায়নি।"); return; }
+  saveBlob(buildDocx({ blocks: r.blocks, rtl: r.rtl, noLetterhead: true }), safeFileName(p.title) + ".docx");
+}
+function renderPaperLibrary(){
+  const list = db.savedPapers || [];
+  const rows = list.length ? list.map(p => `
+    <div style="border:1px solid #D7DDCB;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff;">
+      <div style="font-weight:700;line-height:1.5;">${esc(p.title)}</div>
+      <div style="font-size:11.5px;color:#5B6357;margin:2px 0 8px;">${p.lang === "ar" ? "আরবি (ডান থেকে বামে)" : "বাংলা"}${p.builtin ? " • তৈরি করা নমুনা" : ""}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn small" type="button" data-paper-open="${p.id}">👁 খুলুন / সম্পাদনা ও প্রিন্ট</button>
+        <button class="btn ghost small" type="button" data-paper-word="${p.id}">📝 Word</button>
+        <button class="btn ghost small" type="button" data-paper-rename="${p.id}">✏️ নাম</button>
+        <button class="del-btn" data-delete="savedPapers" data-id="${p.id}" title="মুছুন">🗑</button>
+      </div></div>`).join("") : `<div class="empty">কোনো প্রস্তুত প্রশ্নপত্র নেই।</div>`;
+  return `
+    <div class="arch form-card" id="paperLib">
+      <strong>📑 প্রস্তুত প্রশ্নপত্র লাইব্রেরি</strong>
+      <p style="font-size:12.5px;color:#5B6357;margin:6px 0 10px;">পুরো প্রশ্নপত্র যেমন আছে তেমন রাখা থাকে। খুলে লেখায় চাপ দিয়ে সম্পাদনা করা যায়, তারপর "💾 অ্যাপে সংরক্ষণ" বা প্রিন্ট।</p>
+      ${rows}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+        <label class="btn ghost small" style="cursor:pointer;">➕ HTML ফাইল থেকে আনুন<input type="file" accept=".html,.htm,text/html" data-paper-import style="display:none;"></label>
+        <button class="btn ghost small" type="button" data-action="qp-save-lib">💾 নিচের সাজানো প্রশ্নপত্র লাইব্রেরিতে রাখুন</button>
+      </div>
+    </div>`;
+}
+
+/* ============================ কার্যকরী কমিটি ============================ */
+const COMMITTEE_POSTS = ["সভাপতি","সহ-সভাপতি","সাধারণ সম্পাদক","সহ-সাধারণ সম্পাদক","সাংগঠনিক সম্পাদক","কোষাধ্যক্ষ","সদস্য-সচিব (মুহতামিম)","শিক্ষক প্রতিনিধি","অভিভাবক প্রতিনিধি","দাতা সদস্য","উপদেষ্টা","সদস্য"];
+function committeeSorted(){
+  const rank = p => { const i = COMMITTEE_POSTS.indexOf(p); return i < 0 ? COMMITTEE_POSTS.length - 1 : i; };
+  return (db.committee || []).slice().sort((a, b) => rank(a.post) - rank(b.post) || String(a.name).localeCompare(String(b.name), "bn"));
+}
+function committeeInfo(){ const c = db.committeeInfo || {}; return { title: c.title || "কার্যকরী কমিটির তালিকা" }; }
+function bnDigitsToEn(s){ return String(s || "").replace(/[০-৯]/g, d => String("০১২৩৪৫৬৭৮৯".indexOf(d))); }
+function dialNumber(p){ return bnDigitsToEn(p).replace(/[^\d+]/g, ""); }
+function renderCommitteeTab(){
+  const info = committeeInfo();
+  const ed = miscState.committeeEdit ? (db.committee || []).find(x => x.id === miscState.committeeEdit) : null;
+  const list = committeeSorted();
+  const customPost = ed && !COMMITTEE_POSTS.includes(ed.post) ? ed.post : "";
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  const rows = list.length ? list.map((m, i) => `
+    <div style="border:1px solid #D7DDCB;border-radius:10px;padding:9px 12px;margin-bottom:7px;background:#fff;display:flex;gap:8px;align-items:flex-start;">
+      <div style="min-width:24px;font-weight:700;color:#14432A;">${bn(i + 1)}.</div>
+      <div style="flex:1;">
+        <div style="font-weight:700;">${esc(m.name)}</div>
+        <div style="font-size:12.5px;margin-top:2px;"><span style="background:#EEF2E8;border-radius:10px;padding:1px 9px;color:#14432A;">${esc(m.post)}</span>
+          ${m.mobile ? ` • <a href="tel:${esc(dialNumber(m.mobile))}" style="color:#14432A;">📞 ${esc(m.mobile)}</a>` : ""}${m.since ? ` • ${esc(m.since)}` : ""}</div>
+        ${m.address ? `<div style="font-size:12px;color:#5B6357;margin-top:2px;">${esc(m.address)}</div>` : ""}
+        ${m.note ? `<div style="font-size:12px;color:#5B6357;">${esc(m.note)}</div>` : ""}
+      </div>
+      <div style="display:flex;gap:4px;"><button class="del-btn" data-committee-edit="${m.id}" title="সম্পাদনা">✏️</button><button class="del-btn" data-delete="committee" data-id="${m.id}" title="মুছুন">🗑</button></div>
+    </div>`).join("") : `<div class="empty">এখনো কোনো সদস্য যোগ করা হয়নি।</div>`;
+  return `
+    <div class="sec-head"><div class="badge">👥</div><div><h2>কার্যকরী কমিটি</h2><p>সদস্যদের তালিকা, সভার নোটিশ ও কল বিজ্ঞপ্তি</p></div></div>
+    <div class="arch form-card">
+      <strong>${ed ? "✏️ সদস্যের তথ্য সম্পাদনা" : "➕ নতুন সদস্য যোগ করুন"}</strong>
+      <form class="grid" data-form="committee" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        ${fld("নাম", `<input name="name" required value="${ed ? esc(ed.name) : ""}">`, 2)}
+        ${fld("পদবী", `<select name="post">${COMMITTEE_POSTS.map(p => `<option ${ed && ed.post === p ? "selected" : (!ed && p === "সদস্য" ? "selected" : "")}>${p}</option>`).join("")}</select>`)}
+        ${fld("তালিকায় নেই এমন পদবী (লিখুন)", `<input name="postCustom" value="${esc(customPost)}">`)}
+        ${fld("মোবাইল নম্বর", `<input name="mobile" inputmode="tel" value="${ed ? esc(ed.mobile || "") : ""}">`)}
+        ${fld("মেয়াদ (যেমনঃ ২০২৬-২৮)", `<input name="since" value="${ed ? esc(ed.since || "") : ""}">`)}
+        ${fld("ঠিকানা", `<input name="address" value="${ed ? esc(ed.address || "") : ""}">`, 2)}
+        ${fld("মন্তব্য (ঐচ্ছিক)", `<input name="note" value="${ed ? esc(ed.note || "") : ""}">`, 2)}
+        <div class="btn-end" style="grid-column:span 2;display:flex;gap:8px;"><button class="btn" type="submit">${ed ? "💾 হালনাগাদ করুন" : "➕ যোগ করুন"}</button>${ed ? `<button class="btn ghost" type="button" data-action="committee-cancel">বাতিল</button>` : ""}</div>
+      </form>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <strong>${esc(info.title)} (${bn(list.length)} জন)</strong>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn ghost small" data-print="committee">🖨 প্রিন্ট</button></div>
+      </div>
+      <div style="padding:10px;">${rows}</div>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>🧾 তালিকার শিরোনাম</strong>
+      <form class="grid" data-form="committeeInfo" style="grid-template-columns:1fr;margin-top:8px;">
+        ${fld("প্রিন্টের শিরোনাম (যেমনঃ কার্যকরী কমিটি ২০২৬-২৮)", `<input name="title" value="${esc(info.title)}">`)}
+        <div class="btn-end"><button class="btn small" type="submit">💾 সংরক্ষণ</button></div>
+      </form>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>📢 কমিটির জন্য দ্রুত কাজ</strong>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn" type="button" data-action="committee-notice">📢 কমিটির সভার নোটিশ তৈরি করুন</button>
+        <button class="btn ghost" type="button" data-action="committee-call">📞 সদস্যদের কল বিজ্ঞপ্তি</button>
+      </div>
+    </div>`;
+}
+
+/* ============================ কল ও ভয়েস বিজ্ঞপ্তি ============================ */
+const VC_STATUS = [["pending","অপেক্ষমাণ"],["called","কল হয়েছে"],["noanswer","ধরেনি/ব্যস্ত"],["off","নম্বর বন্ধ"],["later","পরে করব"]];
+let vcRecorder = null, vcChunks = [], vcStream = null, vcAudioBlob = null, vcAudioUrl = "", vcRecStart = 0, vcRecTimer = null;
+function vcDial(phone){ window.location.href = "tel:" + phone; }
+function vcRecipients(group, cls){
+  const out = [], seen = new Set();
+  const add = (name, role, phone) => { const p = dialNumber(phone); if(!p || p.length < 6 || seen.has(p)) return; seen.add(p); out.push({ id: uid(), name, role, phone: p, status: "pending" }); };
+  if(group === "committee") committeeSorted().forEach(m => add(m.name, m.post, m.mobile));
+  else if(group === "teachers") (db.teachers || []).forEach(t => add(t.name, t.designation || "শিক্ষক", t.mobile));
+  else seatOrderedStudents(cls || "all").forEach(s => add((s.guardianName || s.fatherName || "অভিভাবক") + " (" + s.name + ")", s.className, s.guardianMobile || s.mobile));
+  return out;
+}
+function vcScriptFromNotice(n, group){
+  const to = group === "committee" ? "কার্যকরী কমিটির সম্মানিত সদস্য" : group === "teachers" ? "সম্মানিত শিক্ষক" : "সম্মানিত অভিভাবক";
+  const body = String(n.body || "").split(/\n+/).filter(x => x.trim()).join(" ");
+  return `আসসালামু আলাইকুম। ${to}, আমি ${getBrandTitle()} থেকে বলছি। ${n.subject ? n.subject + "। " : ""}${body} আপনার সহযোগিতা কামনা করছি। জাযাকুমুল্লাহু খাইরান।`;
+}
+function vcSpeak(text, lang, rate){
+  if(!("speechSynthesis" in window)){ alert("এই ব্রাউজারে লেখা পড়ে শোনানোর সুবিধা নেই।"); return; }
+  if(!String(text || "").trim()){ alert("আগে বার্তা লিখুন।"); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang; u.rate = Number(rate) || 0.9;
+  const voices = speechSynthesis.getVoices() || [];
+  const v = voices.find(x => x.lang && x.lang.toLowerCase().replace("_", "-").startsWith(lang.toLowerCase().slice(0, 2)));
+  if(v) u.voice = v;
+  else if(voices.length && lang.startsWith("bn")) alert("এই ফোনে বাংলা ভয়েস পাওয়া যায়নি। ফোনের Settings → Text-to-speech-এ Google ইঞ্জিনে বাংলা ভাষা ডাউনলোড করে নিন।");
+  speechSynthesis.speak(u);
+}
+function encodeWav(samples, rate){
+  const dv = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const w = (o, s) => { for(let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); dv.setUint32(4, 36 + samples.length * 2, true); w(8, "WAVE"); w(12, "fmt ");
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  w(36, "data"); dv.setUint32(40, samples.length * 2, true);
+  for(let i = 0; i < samples.length; i++){ const v = Math.max(-1, Math.min(1, samples[i])); dv.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7FFF, true); }
+  return new Blob([dv], { type: "audio/wav" });
+}
+async function blobToWav(blob){
+  const buf = await blob.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  const audio = await new Promise((res, rej) => ac.decodeAudioData(buf, res, rej));
+  if(ac.close) ac.close();
+  const rate = 16000;
+  const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(audio.duration * rate)), rate);
+  const src = off.createBufferSource(); src.buffer = audio; src.connect(off.destination); src.start();
+  const rendered = await off.startRendering();
+  return encodeWav(rendered.getChannelData(0), rate);
+}
+function vcRecUI(){
+  const st = document.getElementById("vcRecStatus"); if(!st) return;
+  const rec = vcRecorder && vcRecorder.state === "recording";
+  const secs = rec ? Math.round((Date.now() - vcRecStart) / 1000) : 0;
+  st.textContent = rec ? "🔴 রেকর্ড হচ্ছে… " + bn(secs) + " সেকেন্ড" : (vcAudioBlob ? "✅ রেকর্ড প্রস্তুত (" + bn(Math.round(vcAudioBlob.size / 1024)) + " KB)" : "রেকর্ড করা হয়নি");
+}
+async function vcStartRec(){
+  if(!navigator.mediaDevices || !window.MediaRecorder){ alert("এই ব্রাউজারে ভয়েস রেকর্ড করা যায় না। Chrome ব্যবহার করুন।"); return; }
+  try{ vcStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch(e){ alert("মাইক্রোফোনের অনুমতি পাওয়া যায়নি। ব্রাউজারের সেটিংসে মাইক্রোফোন চালু করুন।"); return; }
+  const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
+  vcRecorder = new MediaRecorder(vcStream, mime ? { mimeType: mime } : undefined);
+  vcChunks = [];
+  vcRecorder.ondataavailable = e => { if(e.data && e.data.size) vcChunks.push(e.data); };
+  vcRecorder.onstop = async () => {
+    vcStream.getTracks().forEach(t => t.stop());
+    clearInterval(vcRecTimer);
+    const raw = new Blob(vcChunks, { type: vcRecorder.mimeType || "audio/webm" });
+    try{ vcAudioBlob = await blobToWav(raw); } catch(e){ vcAudioBlob = raw; }
+    if(vcAudioUrl) URL.revokeObjectURL(vcAudioUrl);
+    vcAudioUrl = URL.createObjectURL(vcAudioBlob);
+    const au = document.getElementById("vcAudio"); if(au){ au.src = vcAudioUrl; au.style.display = "block"; }
+    vcRecUI();
+  };
+  vcRecorder.start();
+  vcRecStart = Date.now();
+  vcRecTimer = setInterval(vcRecUI, 500);
+  vcRecUI();
+}
+function vcStopRec(){ if(vcRecorder && vcRecorder.state === "recording") vcRecorder.stop(); }
+function vcAudioFile(){ return vcAudioBlob ? new File([vcAudioBlob], "ভয়েস-বিজ্ঞপ্তি-" + todayISO() + (vcAudioBlob.type === "audio/wav" ? ".wav" : ".webm"), { type: vcAudioBlob.type }) : null; }
+async function vcShareAudio(){
+  const f = vcAudioFile(); if(!f){ alert("আগে ভয়েস রেকর্ড করুন।"); return; }
+  if(navigator.canShare && navigator.canShare({ files: [f] })){
+    try{ await navigator.share({ files: [f], title: "ভয়েস বিজ্ঞপ্তি" }); return; }catch(e){ if(e && e.name === "AbortError") return; }
+  }
+  saveBlob(vcAudioBlob, f.name);
+}
+function renderVoiceCallTab(){
+  const camp = db.callCampaign;
+  const notices = db.notices || [];
+  const preset = miscState.vcPreset || "committee";
+  const cOpts = `<option value="all">সকল শ্রেণি</option>` + allClassNames().map(c => `<option>${esc(c)}</option>`).join("");
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  const done = camp ? camp.items.filter(i => i.status !== "pending").length : 0;
+  const campHTML = camp ? `
+    <div class="arch form-card" style="margin-top:8px;" id="vcCampaign">
+      <strong>📞 কল তালিকা — ${bn(done)}/${bn(camp.items.length)} সম্পন্ন</strong>
+      <div style="height:8px;background:#E3E8DA;border-radius:6px;margin:8px 0;overflow:hidden;"><div style="height:100%;width:${camp.items.length ? Math.round(done / camp.items.length * 100) : 0}%;background:#14432A;"></div></div>
+      <details style="margin-bottom:8px;"><summary style="cursor:pointer;font-weight:600;">📜 কলে যা বলবেন (বার্তা)</summary><div style="font-size:14px;line-height:1.8;margin-top:6px;padding:8px;background:#FBF3D5;border-radius:8px;">${esc(camp.text)}</div>
+        <button class="btn ghost small" type="button" data-action="vc-speak-camp" style="margin-top:6px;">🔊 পড়ে শোনান (স্পিকারে)</button></details>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn" type="button" data-action="vc-next">📞 পরবর্তী জনকে কল</button>
+        <button class="btn ghost small" type="button" data-action="vc-export">📤 তালিকা (Excel/Word)</button>
+        <button class="btn ghost small" type="button" data-action="vc-reset">🔁 সব অপেক্ষমাণ করুন</button>
+        <button class="btn ghost small" type="button" data-action="vc-clear">🗑 তালিকা মুছুন</button>
+      </div>
+      ${camp.items.map((it, i) => `
+        <div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px dashed #D7DDCB;${it.status === "pending" ? "" : "opacity:.8;"}">
+          <div style="min-width:22px;color:#5B6357;">${bn(i + 1)}.</div>
+          <div style="flex:1;min-width:0;"><div style="font-weight:600;word-break:break-word;">${esc(it.name)}</div><div style="font-size:12px;color:#5B6357;">${esc(it.role || "")} • ${esc(it.phone)}</div></div>
+          <a class="btn small" href="tel:${esc(it.phone)}" data-vc-call="${it.id}" style="text-decoration:none;">📞</a>
+          <select data-vc-status="${it.id}" style="padding:6px;border:1px solid #C9CFC0;border-radius:8px;font-size:12px;max-width:104px;">${VC_STATUS.map(([k, l]) => `<option value="${k}" ${it.status === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        </div>`).join("")}
+    </div>` : "";
+  setTimeout(vcRecUI, 0);
+  return `
+    <div class="sec-head"><div class="badge">📞</div><div><h2>কল ও ভয়েস বিজ্ঞপ্তি</h2><p>বার্তা তৈরি, একে একে কল, লেখা পড়ে শোনানো ও ভয়েস রেকর্ড</p></div></div>
+    <div class="arch form-card" id="vcBox">
+      <strong>১. বার্তা</strong>
+      <div class="grid" style="grid-template-columns:1fr;margin-top:8px;">
+        ${fld("সংরক্ষিত নোটিস থেকে বার্তা নিন", `<select name="notice" data-vc-notice><option value="">— নিজে লিখব —</option>${notices.map(n => `<option value="${n.id}">${fmtDate(n.date)} — ${esc((n.subject || n.body || "").slice(0, 40))}</option>`).join("")}</select>`)}
+        ${fld("কলে যা বলবেন / পড়ে শোনানো হবে", `<textarea name="text" rows="6" style="width:100%;font-family:inherit;font-size:15px;padding:8px;border:1px solid #C9CFC0;border-radius:8px;">${esc(miscState.vcText || "")}</textarea>`)}
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:6px;">
+        ${fld("ভাষা (পড়ার জন্য)", `<select name="lang"><option value="bn-BD">বাংলা</option><option value="ar-SA">আরবি</option><option value="en-US">English</option></select>`)}
+        ${fld("গতি", `<select name="rate"><option value="0.8">ধীর</option><option value="0.9" selected>স্বাভাবিক</option><option value="1.1">দ্রুত</option></select>`)}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn ghost" type="button" data-action="vc-speak">🔊 পড়ে শোনান</button>
+        <button class="btn ghost small" type="button" data-action="vc-stop">⏹ থামান</button>
+      </div>
+      <div style="margin-top:16px;"><strong>২. কাদের কল করবেন</strong></div>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        ${fld("প্রাপক", `<select name="group"><option value="committee" ${preset === "committee" ? "selected" : ""}>কার্যকরী কমিটির সদস্য</option><option value="teachers" ${preset === "teachers" ? "selected" : ""}>শিক্ষকবৃন্দ</option><option value="guardians" ${preset === "guardians" ? "selected" : ""}>অভিভাবক (ছাত্রের মোবাইল)</option></select>`)}
+        ${fld("শ্রেণি (শুধু অভিভাবকদের জন্য)", `<select name="cls">${cOpts}</select>`)}
+      </div>
+      <div style="margin-top:10px;"><button class="btn" type="button" data-action="vc-build">📋 কল তালিকা তৈরি করুন</button></div>
+    </div>
+    ${campHTML}
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>৩. ভয়েস বার্তা রেকর্ড করে পাঠান</strong>
+      <p style="font-size:12.5px;color:#5B6357;margin:6px 0;">নিজের কণ্ঠে বিজ্ঞপ্তি রেকর্ড করে WhatsApp/Telegram গ্রুপে পাঠান, অথবা কলের সময় স্পিকারফোনে বাজিয়ে শোনান।</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" type="button" data-action="vc-rec-start">🎙 রেকর্ড শুরু</button>
+        <button class="btn ghost" type="button" data-action="vc-rec-stop">⏹ শেষ করুন</button>
+      </div>
+      <div id="vcRecStatus" style="margin:8px 0;font-size:13px;"></div>
+      <audio id="vcAudio" controls ${vcAudioUrl ? `src="${vcAudioUrl}"` : ""} style="width:100%;${vcAudioUrl ? "" : "display:none;"}"></audio>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn ghost small" type="button" data-action="vc-rec-share">📤 শেয়ার করুন</button>
+        <button class="btn ghost small" type="button" data-action="vc-rec-save">💾 ফাইল হিসেবে নামান</button>
+      </div>
+      <p style="font-size:11.5px;color:#8A7A5A;margin:8px 0 0;">রেকর্ড অ্যাপ বন্ধ করলে মুছে যায়, তাই ফাইল নামিয়ে রাখুন। স্বয়ংক্রিয়ভাবে সবাইকে একসাথে ফোন করার সুবিধা (Robo-call) ফোনের অ্যাপ থেকে হয় না — তার জন্য টেলিকম কোম্পানির আলাদা সেবা লাগে।</p>
+    </div>`;
 }
 
 /* ============================ ছাত্র হাজিরা ============================ */
@@ -4184,6 +5129,16 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     db.bookLinks.unshift({ id:uid(), t:(fd.get("title")||"").trim(), level:fd.get("level")||"অন্যান্য", url, note:(fd.get("note")||"").trim() });
     saveDB(); renderContent(); return;
   }
+  if(type==="committee"){
+    const name = (fd.get("name")||"").trim(); if(!name) return;
+    const post = (fd.get("postCustom")||"").trim() || fd.get("post") || "সদস্য";
+    const rec = { name, post, mobile:(fd.get("mobile")||"").trim(), address:(fd.get("address")||"").trim(), since:(fd.get("since")||"").trim(), note:(fd.get("note")||"").trim() };
+    db.committee = db.committee || [];
+    if(miscState.committeeEdit){ const m = db.committee.find(x => x.id === miscState.committeeEdit); if(m) Object.assign(m, rec); miscState.committeeEdit = ""; }
+    else db.committee.push(Object.assign({ id: uid() }, rec));
+    saveDB(); renderContent(); return;
+  }
+  if(type==="committeeInfo"){ db.committeeInfo = { title:(fd.get("title")||"").trim() }; saveDB(); renderContent(); alert("সংরক্ষণ করা হয়েছে।"); return; }
   if(type==="routineConfig"){
     const cur = db.routineConfig || {};
     const next = Object.assign({}, cur);
@@ -4198,7 +5153,7 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     const classes = fd.getAll("feeClass"), amts = fd.getAll("feeAmt");
     const fees = classes.map((c,i)=>({cls:c, amt:amts[i]||""})).filter(f=>f.cls && f.amt!=="");
     const n = { id:uid(), date:fd.get("date")||todayISO(), ref:(fd.get("ref")||"").trim(), subject:(fd.get("subject")||"").trim(), body, fees,
-      signerName:(fd.get("signerName")||"").trim(), signerTitle:fd.get("signerTitle")||"", order: fd.get("order")==="on" };
+      signerName:(fd.get("signerName")||"").trim(), signerTitle:fd.get("signerTitle")||"", order: fd.get("order")==="on", attachCommittee: fd.get("attachCommittee")==="on" };
     db.notices = db.notices || [];
     db.notices.unshift(n);
     logActivity("নোটিস তৈরি", (n.subject || body).slice(0,60));
@@ -4425,7 +5380,7 @@ function applyBrandingToShell(){
   if(subEl) subEl.textContent = getBrandSub();
   const arEl = document.getElementById("sidebarBrandArabic");
   if(arEl){ arEl.textContent = getBrandArabic(); arEl.style.display = getBrandArabic() ? "" : "none"; arEl.style.fontSize = Math.round(25 * ((Number(getBrandingConfig().arabicScale) || 100) / 100)) + "px"; }
-  document.title = getBrandTitle() + " — ব্যবস্থাপনা সফটওয়্যার";
+  document.title = "Our Madrasa — " + getBrandTitle();
   const logoContainerEl = document.getElementById("sidebarLogoContainer");
   if(logoContainerEl) logoContainerEl.innerHTML = `<img src="${getBrandLogo()}" alt="লোগো" style="width:70px;height:70px;object-fit:contain;margin-bottom:6px;border-radius:8px;">`;
 }
@@ -5110,7 +6065,7 @@ function printAllAttendanceRegistersSeparately(){
   safePrint(win);
 }
 
-function printCurrentTab(tab){
+function printCurrentTab(tab, exportMode){
   let title = "", columns = [], rows = [], totalsRow = null;
 
   if(LEDGER_CONFIGS[tab]){
@@ -5144,6 +6099,10 @@ function printCurrentTab(tab){
       {label:"পরিশোধের তারিখ", get:r=>r.payDate?fmtDate(r.payDate):"-"}
     ];
     rows = db[cfg.key];
+  } else if(tab==="committee"){
+    title = committeeInfo().title;
+    columns = [{label:"ক্রম",get:r=>bn(r._i)},{label:"নাম",get:r=>r.name},{label:"পদবী",get:r=>r.post},{label:"মোবাইল",get:r=>r.mobile||"-"},{label:"ঠিকানা",get:r=>r.address||"-"},{label:"মেয়াদ/মন্তব্য",get:r=>[r.since,r.note].filter(Boolean).join(" • ")||"-"}];
+    rows = committeeSorted().map((m,i)=>Object.assign({},m,{_i:i+1}));
   } else if(tab==="classRoutine"){
     title = "ক্লাস রুটিন";
     columns = [{label:"বার",get:r=>r.day},{label:"সময়",get:r=>r.time},{label:"শ্রেণি",get:r=>r.className},{label:"বিষয়",get:r=>r.subject},{label:"শিক্ষক",get:r=>r.teacher||"-"}];
@@ -5291,6 +6250,11 @@ function printCurrentTab(tab){
     rows = db.teacherSalaries;
   }
 
+  if(exportMode){
+    if(!columns.length){ alert("এই তালিকা এক্সপোর্ট করা যায় না।"); return; }
+    exportSingleTable({ file: title, title, head: columns.map(c => c.label), rows: rows.map(r => columns.map(c => c.get(r))), totals: totalsRow });
+    return;
+  }
   const now = new Date();
   const printDate = bn(now.getDate())+" "+MONTHS_BN[now.getMonth()]+" "+bn(now.getFullYear());
 
@@ -5988,6 +6952,7 @@ document.addEventListener("change", function(e){
 });
 
 /* ============================ ইনিশিয়ালাইজ ============================ */
+seedReadyPapers();
 applyBrandingToShell();
 renderContent();
 setTimeout(offerSidMigration, 1200);
@@ -6043,6 +7008,13 @@ document.addEventListener("click", function(e){
   if(e.target.closest('[data-action="res-praise"]')){ resultCertBatch("praise"); return; }
   if(e.target.closest('[data-action="res-sanad-one"]')){ resultCertOne("sanad"); return; }
   if(e.target.closest('[data-action="res-praise-one"]')){ resultCertOne("praise"); return; }
+  if(e.target.closest('[data-action="qp-add"]')){ qpAdd(); return; }
+  if(e.target.closest('[data-action="qp-print"]')){ printQuestionPaper(); return; }
+  if(e.target.closest('[data-action="qp-all"]')){
+    const v = boxValues("qpBox"); miscState.qpSelected = miscState.qpSelected || {};
+    qpBankFor(v).forEach(q => { miscState.qpSelected[q.id] = true; }); renderQpBank(); return;
+  }
+  if(e.target.closest('[data-action="qp-none"]')){ miscState.qpSelected = {}; renderQpBank(); return; }
   const certBtn = e.target.closest('[data-action^="cert-"]');
   if(certBtn){ certAction(certBtn.dataset.action.slice(5)); return; }
   if(e.target.closest('[data-action="print-marksheets"]')){ printMarksheets(miscState.tabExamName, miscState.tabClassFilter || "all"); return; }
@@ -6246,6 +7218,154 @@ document.addEventListener("change", function(e){
   if(!sel) return;
   db.certConfig = Object.assign({}, db.certConfig || {}, { perPage: Number(sel.value) === 1 ? 1 : 2 });
   saveDB();
+});
+
+/* প্রশ্নপত্র: বাছাই, নম্বর পরিবর্তন ও শ্রেণি/কিতাব বদলালে তালিকা হালনাগাদ */
+document.addEventListener("change", function(e){
+  const pick = e.target.closest("[data-qp-pick]");
+  if(pick){ miscState.qpSelected = miscState.qpSelected || {}; if(pick.checked) miscState.qpSelected[pick.dataset.qpPick] = true; else delete miscState.qpSelected[pick.dataset.qpPick]; updateQpSummary(); return; }
+  const mk = e.target.closest("[data-qp-marks]");
+  if(mk){ const q = (db.questionBank || []).find(x => x.id === mk.dataset.qpMarks); if(q){ q.marks = Number(mk.value) || 0; saveDB(); updateQpSummary(); } return; }
+  if(e.target.closest("#qpBox") && (e.target.name === "cls" || e.target.name === "subject" || e.target.name === "allcls" || e.target.name === "full")){
+    if(e.target.value === "__new__") return;
+    renderQpBank();
+  }
+});
+
+/* এক্সপোর্ট বাটনের ইভেন্ট ও প্রতিটি রেন্ডারে Excel/Word বাটন যোগ */
+document.addEventListener("click", function(e){
+  const ex = e.target.closest("[data-export]");
+  if(ex){ printCurrentTab(ex.dataset.export, "choose"); return; }
+  const a = e.target.closest("[data-action]");
+  if(a){
+    const act = a.dataset.action;
+    if(act === "export-result-sheet"){ exportResultSheet(false); return; }
+    if(act === "export-merit"){ exportResultSheet(true); return; }
+    if(act === "export-class-routine"){ exportClassRoutine(); return; }
+    if(act === "export-exam-routine"){ exportExamRoutine(a.dataset.exam); return; }
+    if(act === "export-marks-sheet"){ exportMarksSheet(); return; }
+    if(act === "export-seat-list"){ exportSeatList(); return; }
+    if(act === "qp-word"){ exportQuestionPaperWord(); return; }
+  }
+  const nw = e.target.closest("[data-notice-word]");
+  if(nw){ const n = (db.notices || []).find(x => x.id === nw.dataset.noticeWord); if(n) exportNoticeWord(n); return; }
+});
+const __origRenderContent = renderContent;
+renderContent = function(){ const r = __origRenderContent.apply(this, arguments); try{ injectExportButtons(); }catch(e){} return r; };
+try{ injectExportButtons(); }catch(e){}
+
+/* প্রস্তুত প্রশ্নপত্র লাইব্রেরির ইভেন্ট */
+document.addEventListener("click", function(e){
+  const o = e.target.closest("[data-paper-open]");
+  if(o){ openSavedPaper(o.dataset.paperOpen); return; }
+  const w = e.target.closest("[data-paper-word]");
+  if(w){ exportPaperWord(w.dataset.paperWord); return; }
+  const r = e.target.closest("[data-paper-rename]");
+  if(r){
+    const p = savedPaperById(r.dataset.paperRename); if(!p) return;
+    const nt = (prompt("প্রশ্নপত্রের নতুন নাম", p.title) || "").trim();
+    if(nt){ p.title = nt; saveDB(); renderContent(); }
+    return;
+  }
+  if(e.target.closest('[data-action="qp-save-lib"]')){
+    const v = boxValues("qpBox");
+    if(!selectedQuestions().length){ alert("আগে নিচের প্রশ্ন ব্যাংক থেকে প্রশ্ন বাছুন।"); return; }
+    const html = questionPaperHTML(); if(!html) return;
+    const subj = v.subject && v.subject !== "__new__" ? v.subject : "";
+    const def = [subj, v.cls && v.cls !== "__new__" ? v.cls : "", v.exam && v.exam !== "__new__" ? v.exam : ""].filter(Boolean).join(" — ") || "প্রশ্নপত্র";
+    const title = (prompt("প্রশ্নপত্রের নাম দিন", def) || "").trim();
+    if(!title) return;
+    db.savedPapers = db.savedPapers || [];
+    db.savedPapers.push({ id: uid(), title, lang: v.dir === "rtl" ? "ar" : "bn", html, created: todayISO() });
+    saveDB(); renderContent();
+    return;
+  }
+});
+document.addEventListener("change", function(e){
+  const inp = e.target.closest("input[data-paper-import]");
+  if(!inp || !inp.files || !inp.files[0]) return;
+  const f = inp.files[0];
+  const rd = new FileReader();
+  rd.onload = () => {
+    const html = String(rd.result || "");
+    if(!/<html|<body|class="paper"/i.test(html)){ alert("এটি সঠিক HTML প্রশ্নপত্র ফাইল নয়।"); return; }
+    const m = html.match(/<title>(.*?)<\/title>/is);
+    const def = (m ? m[1] : f.name.replace(/\.html?$/i, "")).trim();
+    const title = (prompt("প্রশ্নপত্রের নাম দিন", def) || "").trim();
+    if(!title) return;
+    const rtl = /<html[^>]*dir=["']rtl/i.test(html);
+    db.savedPapers = db.savedPapers || [];
+    db.savedPapers.push({ id: uid(), title, lang: rtl ? "ar" : "bn", html, created: todayISO() });
+    saveDB(); renderContent();
+  };
+  rd.readAsText(f, "utf-8");
+  inp.value = "";
+});
+
+/* কমিটি ও কল বিজ্ঞপ্তির ইভেন্ট */
+document.addEventListener("click", function(e){
+  const ce = e.target.closest("[data-committee-edit]");
+  if(ce){ miscState.committeeEdit = ce.dataset.committeeEdit; renderContent(); window.scrollTo(0, 0); return; }
+  const vcc = e.target.closest("[data-vc-call]");
+  if(vcc){
+    const c = db.callCampaign; const it = c && c.items.find(x => x.id === vcc.dataset.vcCall);
+    if(it && it.status === "pending"){ it.status = "called"; saveDB(); setTimeout(renderContent, 700); }
+    return;
+  }
+  const a = e.target.closest("[data-action]");
+  if(!a) return;
+  const act = a.dataset.action;
+  const camp = db.callCampaign;
+  if(act === "committee-cancel"){ miscState.committeeEdit = ""; renderContent(); return; }
+  if(act === "committee-notice"){ miscState.noticePreset = "committee"; setTab("notices"); return; }
+  if(act === "committee-call"){ miscState.vcPreset = "committee"; setTab("voicecall"); return; }
+  if(act === "vc-speak"){ const v = boxValues("vcBox"); miscState.vcText = v.text; vcSpeak(v.text, v.lang || "bn-BD", v.rate); return; }
+  if(act === "vc-speak-camp"){ if(camp) vcSpeak(camp.text, "bn-BD", 0.9); return; }
+  if(act === "vc-stop"){ if("speechSynthesis" in window) speechSynthesis.cancel(); return; }
+  if(act === "vc-build"){
+    const v = boxValues("vcBox");
+    if(!(v.text || "").trim()){ alert("আগে কলে যা বলবেন সেই বার্তা লিখুন।"); return; }
+    const items = vcRecipients(v.group, v.cls);
+    if(!items.length){ alert("এই দলে কারও মোবাইল নম্বর পাওয়া যায়নি। আগে নম্বর যোগ করুন।"); return; }
+    miscState.vcText = v.text; miscState.vcPreset = v.group;
+    db.callCampaign = { id: uid(), text: v.text.trim(), group: v.group, created: todayISO(), items };
+    saveDB(); renderContent();
+    setTimeout(() => { const el = document.getElementById("vcCampaign"); if(el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 50);
+    return;
+  }
+  if(act === "vc-next"){
+    if(!camp) return;
+    const it = camp.items.find(x => x.status === "pending");
+    if(!it){ alert("সবাইকে কল করা হয়ে গেছে। ✅"); return; }
+    it.status = "called"; saveDB(); renderContent();
+    vcDial(it.phone);
+    return;
+  }
+  if(act === "vc-reset"){ if(camp && confirm("সবার অবস্থা 'অপেক্ষমাণ' করে দেবেন?")){ camp.items.forEach(i => i.status = "pending"); saveDB(); renderContent(); } return; }
+  if(act === "vc-clear"){ if(camp && confirm("কল তালিকা মুছে ফেলবেন?")){ db.callCampaign = null; saveDB(); renderContent(); } return; }
+  if(act === "vc-export"){
+    if(!camp) return;
+    const lbl = k => (VC_STATUS.find(x => x[0] === k) || [0, k])[1];
+    exportSingleTable({ file: "কল-তালিকা", title: "কল তালিকা — " + fmtDate(camp.created), head: ["ক্রম", "নাম", "পদ/শ্রেণি", "মোবাইল", "অবস্থা"], rows: camp.items.map((i, n) => [bn(n + 1), i.name, i.role || "", i.phone, lbl(i.status)]), notes: [camp.text], formats: ["xlsx", "docx"] });
+    return;
+  }
+  if(act === "vc-rec-start"){ vcStartRec(); return; }
+  if(act === "vc-rec-stop"){ vcStopRec(); return; }
+  if(act === "vc-rec-share"){ vcShareAudio(); return; }
+  if(act === "vc-rec-save"){ const f = vcAudioFile(); if(!f){ alert("আগে ভয়েস রেকর্ড করুন।"); return; } saveBlob(vcAudioBlob, f.name); return; }
+});
+document.addEventListener("change", function(e){
+  const st = e.target.closest("[data-vc-status]");
+  if(st){ const c = db.callCampaign; const it = c && c.items.find(x => x.id === st.dataset.vcStatus); if(it){ it.status = st.value; saveDB(); renderContent(); } return; }
+  const nt = e.target.closest("[data-vc-notice]");
+  if(nt){
+    const n = (db.notices || []).find(x => x.id === nt.value);
+    const ta = document.querySelector("#vcBox [name=text]");
+    if(n && ta){ ta.value = vcScriptFromNotice(n, boxValues("vcBox").group); miscState.vcText = ta.value; }
+  }
+});
+document.addEventListener("input", function(e){
+  if(e.target.closest("#vcBox") && e.target.name === "text") miscState.vcText = e.target.value;
 });
 </script>
 </body>
