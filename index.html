@@ -3639,7 +3639,80 @@ function committeeSorted(){
 function committeeInfo(){ const c = db.committeeInfo || {}; return { title: c.title || "কার্যকরী কমিটির তালিকা" }; }
 function bnDigitsToEn(s){ return String(s || "").replace(/[০-৯]/g, d => String("০১২৩৪৫৬৭৮৯".indexOf(d))); }
 function dialNumber(p){ return bnDigitsToEn(p).replace(/[^\d+]/g, ""); }
+/* ---- একসাথে পেস্ট করে সদস্য যোগ ---- */
+const COMMITTEE_POST_WORDS = ["সভাপতি","সহ-সভাপতি","সহসভাপতি","সাধারণ সম্পাদক","সহ-সাধারণ সম্পাদক","সাংগঠনিক সম্পাদক","সম্পাদক","সেক্রেটারি","কোষাধ্যক্ষ","ক্যাশিয়ার","সদস্য-সচিব","সদস্য সচিব","শিক্ষক প্রতিনিধি","অভিভাবক প্রতিনিধি","দাতা সদস্য","উপদেষ্টা","চেয়ারম্যান","মুহতামিম","সদস্য"];
+function cmNormalizePost(t){
+  const x = String(t || "").trim();
+  if(!x) return "সদস্য";
+  const exact = COMMITTEE_POSTS.find(p => p === x); if(exact) return exact;
+  const alias = { "সহসভাপতি": "সহ-সভাপতি", "সদস্য সচিব": "সদস্য-সচিব (মুহতামিম)", "সদস্য-সচিব": "সদস্য-সচিব (মুহতামিম)", "মুহতামিম": "সদস্য-সচিব (মুহতামিম)", "সেক্রেটারি": "সাধারণ সম্পাদক", "সম্পাদক": "সাধারণ সম্পাদক", "ক্যাশিয়ার": "কোষাধ্যক্ষ" };
+  return alias[x] || x;
+}
+function cmLooksLikePost(t){
+  const x = String(t || "").trim();
+  if(!x || x.length > 40) return false;
+  return COMMITTEE_POST_WORDS.some(w => x === w || x.replace(/\s+/g, "") === w.replace(/\s+/g, "") || (x.length <= w.length + 8 && x.includes(w)));
+}
+function cmLooksLikePhone(t){
+  const d = bnDigitsToEn(t).replace(/[\s\-().]/g, "");
+  return /^\+?\d{10,14}$/.test(d) && /^(\+?88)?0?1\d{9}$/.test(d);
+}
+function parseCommitteePaste(text){
+  const rows = [];
+  const existing = db.committee || [];
+  const seen = new Set();
+  String(text || "").split(/\r?\n/).forEach(raw => {
+    let line = raw.replace(/\u00a0/g, " ").trim();
+    if(!line) return;
+    line = line.replace(/^[\s•▪●*\-–—]*(?:[০-৯0-9]{1,3}\s*[.)।:\-]\s*|[০-৯0-9]{1,3}\s+(?=\D))/, "").trim();
+    if(!line) return;
+    if(/(নাম|Name)/i.test(line) && /(পদবী|পদ\b|মোবাইল|Mobile|Post)/i.test(line) && !cmLooksLikePhone(line)) return;
+    let parts;
+    if(line.includes("\t")) parts = line.split("\t");
+    else if(line.includes("|")) parts = line.split("|");
+    else if(/[,،;；]/.test(line)) parts = line.split(/[,،;；]/);
+    else if(/\s[-–—]\s/.test(line)) parts = line.split(/\s[-–—]\s/);
+    else if(/[:：]/.test(line)) parts = line.split(/[:：]/);
+    else parts = [line];
+    parts = parts.map(x => x.trim()).filter(Boolean);
+    let name = "", post = "", mobile = "", rest = [];
+    const rawParts = [];
+    parts.forEach(pt => {
+      const cp = pt.match(/^([^:：]{2,40})[:：]\s*(.+)$/);
+      if(cp && cmLooksLikePost(cp[1])){ rawParts.push(cp[1].trim()); rawParts.push(cp[2].trim()); return; }
+      const par = pt.match(/^(.*?)\s*[(（]([^)）]+)[)）]\s*$/);
+      if(par && cmLooksLikePost(par[2])){ rawParts.push(par[1].trim()); rawParts.push(par[2].trim()); } else rawParts.push(pt);
+    });
+    rawParts.forEach(pt => {
+      if(!mobile && cmLooksLikePhone(pt)){ mobile = dialNumber(pt).replace(/^\+?88/, ""); return; }
+      if(!post && cmLooksLikePost(pt)){ post = cmNormalizePost(pt); return; }
+      if(!name) name = pt; else rest.push(pt);
+    });
+    if(!mobile){
+      const m = line.match(/(\+?[০-৯\d][০-৯\d\s\-]{9,15}[০-৯\d])/);
+      if(m && cmLooksLikePhone(m[1])){ mobile = dialNumber(m[1]).replace(/^\+?88/, ""); name = name.replace(m[1], "").trim(); }
+    }
+    const pn = name.match(/^(.*?)\s*[(（]([^)）]+)[)）]\s*$/);
+    if(pn && cmLooksLikePost(pn[2])){ if(!post) post = cmNormalizePost(pn[2]); name = pn[1].trim(); }
+    if(!name) return;
+    const key = (mobile || name).replace(/\s+/g, "");
+    const dup = seen.has(key) || existing.some(m => (mobile && dialNumber(m.mobile || "").replace(/^\+?88/, "") === mobile) || (m.name || "").trim() === name);
+    seen.add(key);
+    rows.push({ name, post: post || "সদস্য", mobile, address: rest.join(", "), dup });
+  });
+  return rows;
+}
+function renderCommitteePreview(){
+  const box = document.getElementById("cmPreview"); if(!box) return;
+  const rows = miscState.cmParsed || [];
+  if(!rows.length){ box.innerHTML = ""; return; }
+  const add = rows.filter(r => !r.dup).length;
+  box.innerHTML = `<div style="font-size:13px;margin:8px 0;">পাওয়া গেছে <b>${bn(rows.length)}</b> জন — যোগ হবে <b style="color:#14432A;">${bn(add)}</b> জন${rows.length - add ? `, আগে থেকে আছে বলে বাদ <b style="color:#B3261E;">${bn(rows.length - add)}</b> জন` : ""}</div>
+    <div style="overflow-x:auto;"><table><thead><tr><th>#</th><th>নাম</th><th>পদবী</th><th>মোবাইল</th><th>ঠিকানা</th></tr></thead><tbody>${rows.map((r, i) => `<tr style="${r.dup ? "opacity:.5;text-decoration:line-through;" : ""}"><td>${bn(i + 1)}</td><td style="text-align:left;">${esc(r.name)}</td><td>${esc(r.post)}</td><td>${esc(r.mobile || "-")}</td><td style="text-align:left;">${esc(r.address || "-")}</td></tr>`).join("")}</tbody></table></div>
+    ${add ? `<div style="margin-top:10px;"><button class="btn" type="button" data-action="cm-paste-add">✅ ${bn(add)} জনকে যোগ করুন</button></div>` : ""}`;
+}
 function renderCommitteeTab(){
+  setTimeout(renderCommitteePreview, 0);
   const info = committeeInfo();
   const ed = miscState.committeeEdit ? (db.committee || []).find(x => x.id === miscState.committeeEdit) : null;
   const list = committeeSorted();
@@ -3659,7 +3732,15 @@ function renderCommitteeTab(){
     </div>`).join("") : `<div class="empty">এখনো কোনো সদস্য যোগ করা হয়নি।</div>`;
   return `
     <div class="sec-head"><div class="badge">👥</div><div><h2>কার্যকরী কমিটি</h2><p>সদস্যদের তালিকা, সভার নোটিশ ও কল বিজ্ঞপ্তি</p></div></div>
-    <div class="arch form-card">
+    <div class="arch form-card" id="cmPasteBox">
+      <strong>📋 সব সদস্য একসাথে পেস্ট করুন</strong>
+      <p style="font-size:12.5px;color:#5B6357;margin:6px 0;">প্রতি লাইনে একজন। কমা, ট্যাব বা "-" দিয়ে আলাদা করা যায়; Excel/Google Sheets/Word থেকে কপি করে সরাসরি পেস্ট করা যায়। ক্রম বা শিরোনামের লাইন নিজে বাদ যায়, ক্রম (নাম, পদবী, মোবাইল, ঠিকানা) আগে-পরে হলেও চলে।<br><span style="color:#8A7A5A;">উদাহরণ: আলহাজ্ব রহিম উদ্দিন, সভাপতি, 01711111111, কাচারী বাজার</span></p>
+      <textarea name="paste" rows="7" placeholder="১. আলহাজ্ব রহিম উদ্দিন, সভাপতি, 01711111111, কাচারী বাজার&#10;২. মাওঃ বায়জিদ আহমাদ - মুহতামিম - 01733333333&#10;৩. জনাব সালাম (সদস্য) 01744444444" style="width:100%;font-family:inherit;font-size:15px;padding:8px;border:1px solid #C9CFC0;border-radius:8px;">${esc(miscState.cmPasteText || "")}</textarea>
+      <label class="field" style="margin-top:6px;"><span>সবার মেয়াদ (ঐচ্ছিক, যেমনঃ ২০২৬-২৮)</span><input name="pasteSince" value="${esc(miscState.cmPasteSince || "")}"></label>
+      <div style="margin-top:8px;"><button class="btn ghost" type="button" data-action="cm-paste-preview">🔍 দেখে নিন</button></div>
+      <div id="cmPreview"></div>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
       <strong>${ed ? "✏️ সদস্যের তথ্য সম্পাদনা" : "➕ নতুন সদস্য যোগ করুন"}</strong>
       <form class="grid" data-form="committee" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
         ${fld("নাম", `<input name="name" required value="${ed ? esc(ed.name) : ""}">`, 2)}
@@ -7316,6 +7397,25 @@ document.addEventListener("click", function(e){
   if(!a) return;
   const act = a.dataset.action;
   const camp = db.callCampaign;
+  if(act === "cm-paste-preview"){
+    const ta = document.querySelector('#cmPasteBox [name="paste"]');
+    miscState.cmPasteText = ta.value; miscState.cmPasteSince = (document.querySelector('#cmPasteBox [name="pasteSince"]') || {}).value || "";
+    miscState.cmParsed = parseCommitteePaste(ta.value);
+    if(!miscState.cmParsed.length) alert("কোনো সদস্য পাওয়া যায়নি। প্রতি লাইনে নাম ও (থাকলে) পদবী, মোবাইল লিখুন।");
+    renderCommitteePreview(); return;
+  }
+  if(act === "cm-paste-add"){
+    const rows = (miscState.cmParsed || []).filter(r => !r.dup);
+    if(!rows.length) return;
+    const since = (document.querySelector('#cmPasteBox [name="pasteSince"]') || {}).value || "";
+    db.committee = db.committee || [];
+    rows.forEach(r => db.committee.push({ id: uid(), name: r.name, post: r.post, mobile: r.mobile, address: r.address, since: since.trim(), note: "" }));
+    const n = rows.length;
+    miscState.cmParsed = []; miscState.cmPasteText = ""; miscState.cmPasteSince = "";
+    saveDB(); renderContent();
+    alert(bn(n) + " জন সদস্য যোগ করা হয়েছে।");
+    return;
+  }
   if(act === "committee-cancel"){ miscState.committeeEdit = ""; renderContent(); return; }
   if(act === "committee-notice"){ miscState.noticePreset = "committee"; setTab("notices"); return; }
   if(act === "committee-call"){ miscState.vcPreset = "committee"; setTab("voicecall"); return; }
