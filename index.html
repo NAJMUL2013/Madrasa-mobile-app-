@@ -4459,6 +4459,12 @@ function renderBadriTab(tab){
         <div class="btn-end" style="grid-column:span 2;display:flex;gap:8px;"><button class="btn" type="submit">${ed ? "💾 হালনাগাদ করুন" : "➕ যোগ করুন"}</button>${ed ? `<button class="btn ghost" type="button" data-action="badri-cancel-edit">বাতিল</button>` : ""}</div>
       </form>
     </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>📥 একসাথে সকল ${type} বদরী সদস্য যোগ করুন</strong>
+      <p style="margin:6px 0 8px;font-size:12.5px;color:#5B6357;line-height:1.7;">প্রতি লাইনে একজন, এই ক্রমে: <code>নাম, পিতার নাম, মোবাইল, ঠিকানা, ${type} চাঁদার পরিমাণ</code><br>ট্যাব বা কমা দিয়ে আলাদা করুন; এক্সেল/গুগল শিট থেকে কপি করে পেস্ট করা যাবে। সদস্য নং নিজে থেকে ক্রমানুসারে বসবে। একই নাম ও মোবাইল আগে থাকলে বাদ যাবে।</p>
+      <textarea id="bulkBadriInput" rows="6" style="width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13.5px;font-family:inherit;background:#FDFCF8;" placeholder="মোঃ আব্দুর রহিম	মোঃ করিম	01700000000	কুষ্টিয়া পাড়া	৫০০"></textarea>
+      <div style="margin-top:8px;"><button class="btn" type="button" data-action="badri-bulk-add">📥 ${type} বদরী সদস্য আমদানি করুন</button></div>
+    </div>
     <div class="arch" style="margin-top:8px;">
       <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
         <strong>${type} বদরী সদস্যবৃন্দ (${bn(all.length)} জন)</strong>
@@ -8257,6 +8263,24 @@ document.addEventListener("click", function(e){
   if(!a || !/^badri-/.test(a.dataset.action)) return;
   const act = a.dataset.action, type = badriType(currentTab);
   const prof = miscState.badriProfile ? db.patronMembers.find(x => x.id === miscState.badriProfile) : null;
+  if(act === "badri-bulk-add"){
+    const ta = document.getElementById("bulkBadriInput");
+    if(!ta || !ta.value.trim()){ alert("প্রথমে সদস্যদের তথ্য পেস্ট করুন।"); return; }
+    let added = 0, skipped = 0, dup = 0;
+    const lines = ta.value.split("\n").map(l => l.trim()).filter(Boolean);
+    lines.forEach(line => {
+      const parts = (line.includes("\t") ? line.split("\t") : line.split(",")).map(x => x.trim());
+      const [name, fatherName, mobile, address, amount] = parts;
+      if(!name || name.includes("সদস্যের নাম") || name === "নাম"){ skipped++; return; }
+      if(badriMembers(type).some(x => x.name === name && (x.mobile || "") === (mobile || ""))){ dup++; return; }
+      db.patronMembers.push({ id: uid(), subType: type, name, serial: badriNextSerial(type), fatherName: fatherName || "", mobile: mobile || "", address: address || "", amount: amount ? String(bnDigitsToEn(amount)).replace(/[^0-9.]/g, "") : "", joinDate: todayISO(), note: "" });
+      added++;
+    });
+    logActivity("বদরী বাল্ক যোগ (" + type + ")", bn(added) + " জন");
+    saveDB(); renderContent();
+    alert(bn(added) + " জন " + type + " বদরী সদস্য যোগ হয়েছে।" + (dup ? " (" + bn(dup) + " জন আগে থেকেই ছিল, বাদ)" : "") + (skipped ? " (" + bn(skipped) + " টি লাইন বাদ)" : ""));
+    return;
+  }
   if(act === "badri-delete-all"){
     const mem = badriMembers(type);
     if(!mem.length){ alert("মোছার মতো কোনো " + type + " বদরী সদস্য নেই।"); return; }
