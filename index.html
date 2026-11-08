@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Our Madrasa</title>
-<link rel="manifest" href="manifest.json?v=16">
+<link rel="manifest" href="manifest.json?v=17">
 <meta name="theme-color" content="#14432A">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -184,7 +184,7 @@ function defaultDB(){
     libraryLoans:[], patronMembers:[], patronPayments:[],
     teachers:[], teacherAssignments:[], teacherAttendance:[], teacherIdCounters:{}, teacherSalaries:[],
     activityLog:[], paymentClaims:[],
-    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[], certConfig:{}, certLog:[], questionBank:[], savedPapers:[], seededPaperIds:[], committee:[], committeeInfo:{}, callCampaign:null
+    notices:[], subjectList:[], routineConfig:{}, bookLinks:[], resultConfig:{}, resultPublish:[], certConfig:{}, certLog:[], questionBank:[], savedPapers:[], seededPaperIds:[], committee:[], committeeInfo:{}, callCampaign:null, users:[], googleLogin:{}
   };
 }
 function loadDB(){
@@ -202,7 +202,7 @@ function logActivity(action, summary){
   db.activityLog.unshift({
     id: uid(),
     at: new Date().toISOString(),
-    action, summary
+    action, summary: summary + ((currentUser && currentUser.id !== "owner" && String(summary).indexOf(currentUser.name) < 0) ? " — " + currentUser.name : "")
   });
   if(db.activityLog.length > ACTIVITY_LOG_MAX) db.activityLog.length = ACTIVITY_LOG_MAX;
 }
@@ -333,10 +333,10 @@ function lockScreenHTML(mode, errorMsg){
     return `<div class="lock-box">
       <div class="eyebrow2">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</div>
       <h2>ছাত্রের তথ্য খুঁজুন</h2>
-      <p class="hint">সন্তানের ছাত্র আইডি নং ও ভর্তির সময় দেওয়া মোবাইল নম্বরটি দিন — কোনো গোপন কোডের প্রয়োজন নেই।</p>
+      <p class="hint">ভর্তির সময় দেওয়া মোবাইল নম্বরটি দিন — কোনো গোপন কোডের প্রয়োজন নেই। একাধিক সন্তান থাকলে তালিকা থেকে বেছে নিতে পারবেন। চাইলে ছাত্র আইডি নংও দিতে পারেন।</p>
       <form data-form="guardian-lookup">
-        <label class="field"><span>ছাত্র আইডি নং</span><input name="sid" autofocus required placeholder="যেমনঃ ১"></label>
-        <label class="field"><span>মোবাইল নম্বর</span><input name="mobile" required></label>
+        <label class="field"><span>মোবাইল নম্বর</span><input name="mobile" type="tel" inputmode="tel" autofocus required></label>
+        <label class="field"><span>ছাত্র আইডি নং (ঐচ্ছিক)</span><input name="sid" placeholder="যেমনঃ ১"></label>
         ${err}
         ${gAttemptHint}
         <button class="btn" type="submit" style="width:100%;justify-content:center;">খুঁজুন</button>
@@ -346,6 +346,15 @@ function lockScreenHTML(mode, errorMsg){
   }
   if(mode === "guardianResult"){
     return guardianResultHTML(currentGuardianStudent);
+  }
+  if(mode === "guardianPick"){
+    return `<div class="lock-box">
+      <div class="eyebrow2">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</div>
+      <h2>কার তথ্য দেখবেন?</h2>
+      <p class="hint">এই মোবাইল নম্বরে ${bn(guardianCandidates.length)} জন ছাত্র আছে। বেছে নিন।</p>
+      ${guardianCandidates.map(c => `<button class="btn ghost" type="button" data-guardian-pick="${c.id}" style="width:100%;justify-content:flex-start;margin-bottom:8px;text-align:left;">🧑‍🎓 ${esc(c.name)} — ${esc(c.className || "")}${c.sid ? " (আইডি " + esc(c.sid) + ")" : ""}</button>`).join("")}
+      <div class="lock-links"><a id="guardianBack">← ফিরে যান</a></div>
+    </div>`;
   }
   // unlock
   const secLeft = pinLockSecondsLeft();
@@ -360,6 +369,23 @@ function lockScreenHTML(mode, errorMsg){
   const attemptsInThisRound = getPinAttempts() % MAX_PIN_ATTEMPTS;
   const attemptsLeft = MAX_PIN_ATTEMPTS - attemptsInThisRound;
   const attemptHint = getPinAttempts() > 0 ? `<p class="hint" style="color:var(--due);">আর ${bn(attemptsLeft)} বার ভুল হলে সাময়িকভাবে বন্ধ হয়ে যাবে।</p>` : "";
+  if(lockLoginMode === "user" && activeUsers().length){
+    if(googleReady()) setTimeout(setupGoogleButton, 0);
+    return `<div class="lock-box">
+      <div class="eyebrow2">🌙 মাদরাসা ব্যবস্থাপনা</div>
+      <h2>লগইন করুন</h2>
+      <p class="hint">${codeUsers().length ? "আপনার মোবাইল নম্বর ও কোড দিয়ে" : "আপনার Gmail দিয়ে"} প্রবেশ করুন।</p>
+      ${codeUsers().length ? `<form data-form="pin-userlogin">
+        <label class="field"><span>মোবাইল নম্বর</span><input type="tel" inputmode="tel" name="mobile" autocomplete="tel" autofocus required></label>
+        <label class="field"><span>কোড</span><input type="password" inputmode="numeric" name="code" maxlength="8" required></label>
+        ${err}
+        ${attemptHint}
+        <button class="btn" type="submit" style="width:100%;justify-content:center;">প্রবেশ করুন</button>
+      </form>` : err}
+      ${googleReady() ? `<div style="text-align:center;margin:12px 0 4px;color:#5B6357;font-size:13px;">${codeUsers().length ? "— অথবা —" : ""}</div><div id="gsiBtn" style="display:flex;justify-content:center;min-height:44px;"></div><div id="gsiStatus" style="text-align:center;font-size:12px;color:#B3261E;margin-top:4px;"></div>` : ""}
+      <div class="lock-links"><a id="switchOwnerLogin">🔑 মূল গোপন কোড দিয়ে প্রবেশ (মালিক)</a> &nbsp;·&nbsp; <a id="guardianViewLink">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</a></div>
+    </div>`;
+  }
   return `<div class="lock-box">
     <div class="eyebrow2">🌙 মাদরাসা ব্যবস্থাপনা</div>
     <h2>গোপন কোড দিন</h2>
@@ -370,7 +396,7 @@ function lockScreenHTML(mode, errorMsg){
       ${attemptHint}
       <button class="btn" type="submit" style="width:100%;justify-content:center;">প্রবেশ করুন</button>
     </form>
-    <div class="lock-links"><a id="forgotPinLink">গোপন কোড ভুলে গেছেন?</a> &nbsp;·&nbsp; <a id="guardianViewLink">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</a></div>
+    <div class="lock-links">${activeUsers().length ? '<a id="switchUserLogin">📱 মোবাইল নম্বর দিয়ে প্রবেশ</a> &nbsp;·&nbsp; ' : ""}<a id="forgotPinLink">গোপন কোড ভুলে গেছেন?</a> &nbsp;·&nbsp; <a id="guardianViewLink">👨‍👩‍👦 অভিভাবক তথ্য দেখুন</a></div>
   </div>`;
 }
 
@@ -499,14 +525,18 @@ function handleGuardianForm(type, fd){
     if(guardianLockSecondsLeft() > 0){ showLockOverlay("guardian"); startGuardianLockCountdown(); return; }
     const sid = (fd.get("sid")||"").trim();
     const mobile = (fd.get("mobile")||"").trim();
-    const student = db.students.find(s => sidKey(s.sid)===sidKey(sid) && normalizeMobile(s.mobile)===normalizeMobile(mobile));
+    const mob = normalizeMobile(mobile);
+    let cands = mob ? db.students.filter(s => normalizeMobile(s.mobile) === mob || normalizeMobile(s.guardianMobile) === mob) : [];
+    if(sid) cands = cands.filter(s => sidKey(s.sid) === sidKey(sid));
+    const student = cands[0];
     if(!student){
       registerFailedGuardianAttempt();
       if(guardianLockSecondsLeft() > 0){ showLockOverlay("guardian"); startGuardianLockCountdown(); return; }
-      showLockOverlay("guardian", "তথ্য মিলছে না। ছাত্র আইডি ও মোবাইল নম্বর সঠিকভাবে দিন।");
+      showLockOverlay("guardian", "তথ্য মিলছে না। ভর্তির সময় দেওয়া মোবাইল নম্বরটি সঠিকভাবে দিন।");
       return;
     }
     registerSuccessfulGuardianAttempt();
+    if(cands.length > 1){ guardianCandidates = cands; showLockOverlay("guardianPick"); return; }
     currentGuardianStudent = student;
     showLockOverlay("guardianResult");
     return;
@@ -520,6 +550,7 @@ function handlePinForm(type, fd){
     if(p1 !== p2){ showLockOverlay("set", "দুটি কোড মিলছে না, আবার চেষ্টা করুন।"); return; }
     setStoredPinHash(simpleHash(p1));
     hideLockOverlay();
+    currentUser = { id: "owner", name: "মালিক", role: "admin" };
     renderContent();
     return;
   }
@@ -534,9 +565,27 @@ function handlePinForm(type, fd){
     }
     registerSuccessfulPinAttempt();
     hideLockOverlay();
+    currentUser = { id: "owner", name: "মালিক", role: "admin" };
     renderContent();
     checkBackupReminder();
     checkDailyBackupPrompt();
+    return;
+  }
+  if(type === "pin-userlogin"){
+    if(pinLockSecondsLeft() > 0){ showLockOverlay("unlock"); startPinLockCountdown(); return; }
+    const m = normalizeMobile(fd.get("mobile") || ""), code = fd.get("code") || "";
+    const u = m ? codeUsers().find(x => x.mobile === m) : null;
+    if(!u || hashUserCode(code, u.salt) !== u.hash){
+      registerFailedPinAttempt();
+      if(pinLockSecondsLeft() > 0){ showLockOverlay("unlock"); startPinLockCountdown(); return; }
+      showLockOverlay("unlock", "মোবাইল নম্বর বা কোড সঠিক নয়।");
+      return;
+    }
+    registerSuccessfulPinAttempt();
+    currentUser = { id: u.id, name: u.name, role: u.role, mobile: u.mobile };
+    hideLockOverlay();
+    logActivity("লগইন", u.name);
+    afterUserLogin();
     return;
   }
   if(type === "pin-change"){
@@ -854,6 +903,7 @@ const BILLING_CONFIGS = {
 };
 const NAV = [
   {id:"dashboard", label:"ড্যাশবোর্ড", icon:"🏠"},
+  {id:"guide", label:"ব্যবহার নির্দেশিকা", icon:"📖"},
   {id:"income", label:"আয়ের রশিদ", icon:"💰"},
   {id:"expense", label:"ব্যয়ের ভাউচার", icon:"🧾"},
   {id:"fixedAssets", label:"স্থাবর সম্পদ", icon:"🏛"},
@@ -881,10 +931,13 @@ const NAV = [
   {id:"results", label:"ফলাফল", icon:"🎓"},
   {id:"certs", label:"সনদ ও প্রশংসাপত্র", icon:"🏅"},
   {id:"patrons", label:"বদরী সদস্য", icon:"🤝"},
+  {id:"badriMonthly", label:"মাসিক বদরী", icon:"📅"},
+  {id:"badriAnnual", label:"বাৎসরিক বদরী", icon:"🗓"},
   {id:"monthlyReport", label:"মাসিক আয়-ব্যয়ের হিসাব", icon:"📊"},
   {id:"activityLog", label:"অ্যাক্টিভিটি লগ", icon:"📝"},
   {id:"paymentClaims", label:"পেমেন্ট যাচাই", icon:"✅"},
   {id:"paymentSettings", label:"বিকাশ/নগদ সেটিংস", icon:"📱"},
+  {id:"users", label:"ব্যবহারকারী ও লগইন", icon:"👤"},
   {id:"brandingSettings", label:"মাদরাসার তথ্য ও আইকন", icon:"🏫"},
   {id:"onlineSync", label:"অনলাইন সিঙ্ক", icon:"☁️"}
 ];
@@ -938,9 +991,10 @@ let editingStudentId = null;
 
 /* ============================ রেন্ডার — শেল ============================ */
 function renderSidebar(){
-  document.getElementById("navList").innerHTML = NAV.map(n =>
+  document.getElementById("navList").innerHTML = NAV.filter(n => canAccessTab(n.id)).map(n =>
     `<button data-tab="${n.id}" class="${currentTab===n.id?'active':''}">${n.icon} ${n.label}</button>`
   ).join("");
+  applyUserToShell();
 }
 
 function studentMap(){
@@ -1061,6 +1115,7 @@ function selectMemberForPayment(tab, memberId){
 }
 
 function renderContent(){
+  if(!canAccessTab(currentTab)) currentTab = firstAllowedTab();
   renderSidebar();
   const el = document.getElementById("content");
   el.innerHTML = renderTab(currentTab);
@@ -1081,6 +1136,9 @@ function renderTab(tab){
   if(BILLING_CONFIGS[tab]) return renderBillingTab(tab);
   if(tab === "notices") return renderNoticesTab();
   if(tab === "committee") return renderCommitteeTab();
+  if(tab === "guide") return renderGuideTab();
+  if(tab === "users") return renderUsersTab();
+  if(tab === "badriMonthly" || tab === "badriAnnual") return renderBadriTab(tab);
   if(tab === "voicecall") return renderVoiceCallTab();
   if(tab === "classRoutine") return renderClassRoutineTab();
   if(tab === "examRoutine") return renderExamRoutineTab();
@@ -3933,6 +3991,599 @@ function renderVoiceCallTab(){
     </div>`;
 }
 
+const GUIDE_QUICK = [["মাদরাসার নাম, ঠিকানা ও লোগো ঠিক করুন", "brandingSettings"], ["শিক্ষক ও কমিটির সদস্য যোগ করুন", "teachers"], ["ছাত্র ভর্তি করুন ও আইডি কার্ড ছাপুন", "students"], ["ক্লাস রুটিন বানান", "classRoutine"], ["প্রতিদিন হাজিরা নিন", "attendance"], ["আয়-ব্যয়ের রশিদ ও ভাউচার রাখুন", "income"], ["পরীক্ষার পর নম্বর এন্ট্রি করে ফলাফল প্রকাশ করুন", "results"], ["সপ্তাহে একবার ব্যাকআপ নিন", "dashboard"]];
+const GUIDE_SECTIONS = [{"id": "start", "icon": "🚀", "title": "শুরু করার আগে — ইনস্টল ও প্রথম ব্যবহার", "tab": "dashboard", "steps": ["ফোনের ব্রাউজারে (Chrome) অ্যাপের লিংক খুলুন। ব্রাউজারের মেনু (⋮) থেকে \"হোম স্ক্রিনে যোগ করুন\" বা \"ইনস্টল\" চাপুন। এরপর হোম স্ক্রিনের \"Our Madrasa\" আইকনে চাপলেই অ্যাপ খুলবে।", "প্রথমবার ৪ থেকে ৮ সংখ্যার একটি গোপন কোড ঠিক করতে হয়। কোডটি মনে রাখুন, ভুলে গেলে পুনরুদ্ধার করা যায় না। প্রতিবার অ্যাপ খুললে এই কোড লাগবে।", "বাঁ দিকের \"☰ মেনু\" চেপে সব বিভাগে যাওয়া যায়। ওপরের বাটনগুলো: 🔑 কোড পরিবর্তন, 🔒 লক করুন, ⬇ ব্যাকআপ, ⬆ ব্যাকআপ ইমপোর্ট।", "অ্যাপ ইন্টারনেট ছাড়াই চলে। সব তথ্য আপনার ফোনেই থাকে, তাই নিয়মিত ব্যাকআপ নিন।"], "tips": ["এক ফোনের তথ্য অন্য ফোনে নিতে ব্যাকআপ ফাইল নামিয়ে অন্য ফোনে \"ব্যাকআপ ইমপোর্ট\" দিন।", "অ্যাপের নতুন সংস্করণ এলে একবার বন্ধ করে আবার খুলুন। না এলে আরেকবার খুলুন।"]}, {"id": "branding", "icon": "🏫", "title": "মাদরাসার নাম, ঠিকানা ও লোগো ঠিক করুন", "tab": "brandingSettings", "steps": ["মেনু থেকে \"মাদরাসার তথ্য ও আইকন\" খুলুন।", "বাংলা নাম, আরবি নাম, ঠিকানা ও স্থাপিত সাল লিখুন। লোগো বদলাতে চাইলে নতুন ছবি বেছে নিন।", "\"বাংলা নামের আকার (%)\" ও \"আরবি নামের আকার (%)\" দিয়ে হেডারের নামের মাপ ছোট-বড় করা যায় (১০০ = স্বাভাবিক)।", "সংরক্ষণ করলে রশিদ, আইডি কার্ড, প্রবেশপত্র, সনদ, ভর্তি ফরম, নোটিস ও সব প্রিন্টের হেডারে একসাথে বদলে যায়।"], "tips": ["আরবি নামের ঘর ফাঁকা রাখলে প্রিন্টে আরবি নাম আসবে না।", "প্রিন্টের আগে একবার করে নাম ও ঠিকানা মিলিয়ে নিন।"]}, {"id": "teachers", "icon": "👨‍🏫", "title": "শিক্ষক, অ্যাসাইনমেন্ট, হাজিরা ও বেতন", "tab": "teachers", "steps": ["\"শিক্ষকবৃন্দ\" ট্যাবে নাম, মোবাইল ইত্যাদি লিখে শিক্ষক যোগ করুন। প্রতিজনের জন্য শিক্ষক আইডি নিজে থেকে তৈরি হয়।", "\"শিক্ষকদের অ্যাসাইনমেন্ট\"-এ ঠিক করুন কোন শিক্ষক কোন শ্রেণিতে কোন বিষয় পড়াবেন।", "\"শিক্ষকদের হাজিরা\"-এ প্রতিদিনের হাজিরা নিন; মাসের শেষে ছুটির হিসাব দেখা যায়।", "\"শিক্ষকদের বেতন\"-এ মাসিক বেতন স্কেল অনুযায়ী পরিশোধ ও বাকির হিসাব রাখুন।"], "tips": ["শিক্ষকের মোবাইল দিলে \"কল ও ভয়েস বিজ্ঞপ্তি\"-তে তাঁদের একসাথে কল তালিকায় আনা যায়।"]}, {"id": "students", "icon": "🧑‍🎓", "title": "ছাত্র ভর্তি, আইডি কার্ড ও ভর্তি ফরম", "tab": "students", "steps": ["\"ছাত্র ভর্তি\" ট্যাবে ছাত্রের নাম, পিতা-মাতার নাম, জন্মতারিখ, শ্রেণি, মোবাইল, ঠিকানা, ছবি ইত্যাদি দিয়ে সংরক্ষণ করুন।", "ছাত্র আইডি নং নিজে থেকে বসে — সাল ছাড়া ১, ২, ৩… ক্রমে। ভর্তি নং ও সিট নং চাইলে হাতে লিখতে পারেন।", "প্রতিটি ছাত্রের সারিতে 📄 চাপলে তার ভর্তি ফরম প্রিন্টের জন্য খোলে। টুলবারের \"সব ছাত্রের ভর্তি ফরম প্রিন্ট\" দিলে সবার ফরম আলাদা পাতায় আসে।", "ফরমে পরীক্ষকের নাম, পদবী, স্বাক্ষর, প্রাপ্ত নম্বর ও মন্তব্যের ঘর আছে (ভর্তি পরীক্ষার জন্য)। এগুলো হাতে পূরণ করুন।", "\"আইডি কার্ড প্রিন্ট করুন\" দিয়ে ছবিসহ আইডি কার্ড ছাপুন। ভুল হলে ✏️ দিয়ে সংশোধন করুন।"], "tips": ["অভিভাবকের মোবাইল দিয়ে রাখলে অভিভাবক লগইন পর্দা থেকে \"অভিভাবক তথ্য দেখুন\" চেপে শুধু মোবাইল নম্বর দিয়েই সন্তানের তথ্য দেখতে পারেন (একাধিক সন্তান থাকলে তালিকা থেকে বেছে নেন)। কল তালিকায়ও এটি কাজে লাগে।", "পুরনো \"২০২৬-০০০১\" ধরনের আইডি থাকলে \"🔢 আইডি নং সিরিয়ালে বদলান\" বাটন আসবে। বদলালে অভিভাবকের আগের আইডি আর চলবে না, আগে ব্যাকআপ নিন।"]}, {"id": "attendance", "icon": "✅", "title": "হাজিরা (ছাত্র, বোর্ডিং ও শিক্ষক)", "tab": "attendance", "steps": ["\"ছাত্র হাজিরা\"-য় শ্রেণি ও তারিখ বেছে প্রতিজনের হাজিরা দিন ও সংরক্ষণ করুন।", "মাসিক প্রতিবেদন ও রেজিস্টার এখান থেকেই দেখা ও প্রিন্ট করা যায়।", "বোর্ডিং ছাত্রদের জন্য আলাদা \"বোর্ডিং হাজিরা\" আছে, নিয়ম একই।", "শিক্ষকদের হাজিরা \"শিক্ষকদের হাজিরা\" ট্যাবে।"], "tips": ["প্রতিদিন একই সময়ে হাজিরা দেওয়ার অভ্যাস করুন, মাস শেষে হিসাব সহজ হয়।"]}, {"id": "money", "icon": "💰", "title": "আয়, ব্যয়, রশিদ ও মাসিক হিসাব", "tab": "income", "steps": ["\"আয়ের রশিদ\"-এ রশিদ নং, তারিখ, প্রদানকারীর নাম, বিবরণ ও টাকা দিয়ে যোগ করুন। 🧾 দিয়ে সাধারণ রশিদ ছাপুন।", "অনুদানের রশিদের জন্য দাতার পিতার নাম ও ঠিকানা দিন। সারির 📜 বাটনে \"অনুদান গ্রহণের রশিদ\" ছাপা হয়, টাকা কথায়ও লেখা হয়।", "\"📜 ফাঁকা অনুদান রশিদ প্রিন্ট (রশিদ বই)\" দিলে হাতে লেখার জন্য ফাঁকা রশিদ ছাপা যায়, শুরুর ক্রমিক নং দেওয়া যায়।", "\"ব্যয়ের ভাউচার\"-এ খরচ লিখে রাখুন। স্থাবর-অস্থাবর সম্পদ, কুতুবখানা ও বোর্ডিংয়ের হিসাবও আলাদা ট্যাবে আছে।", "\"মাসিক আয়-ব্যয়ের হিসাব\"-এ মাসভিত্তিক আয়, ব্যয় ও জমা দেখা যায়। মাসের নামে চাপলে বিস্তারিত আসে।"], "tips": ["রশিদ ভুল হলে মুছে ফেলার ইতিহাস \"অ্যাক্টিভিটি লগ\"-এ থাকে।"]}, {"id": "fees", "icon": "💳", "title": "মাসিক বেতন, বোর্ডিং বিল ও বদরী সদস্য", "tab": "fees", "steps": ["ছাত্রের তথ্যে মাসিক বেতন ও বোর্ডিংয়ের কোটা ঠিক করা থাকলে \"মাসিক বেতন\" ও \"মাসিক বোর্ডিং বিল\" ট্যাবে সেই অনুযায়ী আদায়ের হিসাব রাখা যায়।", "\"বদরী সদস্য\" ট্যাবে মাসিক/বাৎসরিক চাঁদাদাতাদের তথ্য এবং চাঁদা আদায়ের হিসাব রাখুন।"], "tips": ["আদায়ের পর রশিদ প্রিন্ট করে দিন, তাতে ভবিষ্যতে বিতর্ক কমে।"]}, {"id": "badri", "icon": "🤝", "title": "মাসিক ও বাৎসরিক বদরী — আলাদা প্রোফাইল ও দাতা তথ্যবহি", "tab": "badriMonthly", "steps": ["মেনুতে \"মাসিক বদরী\" ও \"বাৎসরিক বদরী\" দুটি আলাদা বিভাগ আছে। প্রতিটির সদস্য, হিসাব ও সিরিয়াল নং আলাদা।", "\"নতুন সদস্য\" ফর্মে নাম, পিতার নাম, মোবাইল, ঠিকানা ও চাঁদার পরিমাণ দিন। সদস্য নং নিজে থেকে ১, ২, ৩… ক্রমে বসে, চাইলে বদলানো যায় (একই তালিকায় একই নম্বর দুবার হবে না)।", "টাকা নিতে ওপরের \"💰 টাকা পরিশোধ — সদস্য খুঁজুন\" বক্সে সিরিয়াল নং, মোবাইল নম্বর বা নাম লিখুন। \"💰 টাকা নিন\" চাপলে বাকির তালিকা থেকে বাছা বাকি নগদ আদায় করা যায়, অথবা নতুন আদায় (মাস/বছর, পরিমাণ, কত মাসের জন্য) লেখা যায়। আদায়ের পর \"🧾 রশিদ প্রিন্ট\" আসে।", "\"📅 চলতি মাসের বাকি যোগ করুন\" (বাৎসরিকে চলতি বছরের) চাপলে চাঁদার পরিমাণ ঠিক করা সব সদস্যের বাকি একসাথে লেখা হয়। দুবার চাপলেও একই সদস্যের বাকি দুবার হয় না।", "\"📖 তথ্যবহি / প্রোফাইল\" চাপলে সদস্যের পূর্ণ পৃষ্ঠা খোলে: আদায়ের তারিখ, প্রকার, পরিমাণ, রশিদ নং ও নগদ/বাকি। \"🖨 এই পৃষ্ঠা প্রিন্ট\" দিয়ে খাতার মতো একটি পূর্ণ পৃষ্ঠা ছাপা যায় (২২টির বেশি এন্ট্রি হলে পরের পাতা)।", "\"🖨 সবার তথ্যবহি\" দিলে প্রত্যেকের জন্য একটি করে পূর্ণ পৃষ্ঠা একসাথে ছাপা হয়। \"📄 ফাঁকা তথ্যবহির পৃষ্ঠা\" দিয়ে হাতে লেখার ফাঁকা খাতার পাতা ছাপা যায়। তালিকা Excel/Word-এ নামানো যায়।", "\"🗑 সব সদস্য মুছুন\" চাপলে সতর্কবার্তা আসে, মোছার আগে ব্যাকআপ নামানোর সুযোগ দেয় এবং শেষে \"মুছুন\" শব্দটি নিজে লিখে নিশ্চিত করতে হয়। এতে ওই ধরনের সব সদস্য ও তাঁদের সব হিসাব মুছে যায়।"], "tips": ["সদস্যের পাতায় নগদ/বাকি চিহ্নে চাপলে অবস্থা বদলে যায় (বাকি ↔ নগদ)। নগদ আদায় মাসিক আয়-ব্যয়ের হিসাবে যোগ হয়।", "সদস্য মুছে ফেলা ফেরানো যায় না। মোছার আগে অবশ্যই ব্যাকআপ নিন।", "পুরনো \"বদরী সদস্য\" বিভাগের সদস্যরাও নতুন বিভাগে নিজে থেকে সিরিয়াল পেয়ে যান।"]}, {"id": "routine", "icon": "📅", "title": "ক্লাস রুটিন, পরীক্ষার রুটিন ও প্রবেশপত্র", "tab": "classRoutine", "steps": ["\"ক্লাস রুটিন\"-এ শ্রেণি, বার, ঘণ্টা, বিষয় ও শিক্ষক ড্রপডাউন থেকে বেছে যোগ করুন। বিষয়ের তালিকা শ্রেণি অনুযায়ী বদলে যায়। শ্রেণিভিত্তিক বা শিক্ষকভিত্তিক ছক প্রিন্ট করা যায়।", "ঘণ্টার সময় ও রুটিনের শিরোনাম \"⚙️ সেটিং\" থেকে বদলান।", "\"পরীক্ষার রুটিন\"-এ পরীক্ষার নাম, শ্রেণি, বিষয়, তারিখ ও সকাল/বিকাল বেছে যোগ করুন। \"ছক আকারে প্রিন্ট\"-এ তারিখওয়ারি ছক ছাপা হয়।", "একই ট্যাবের নিচে \"প্রবেশপত্র\" অংশ আছে। পরীক্ষা ও শ্রেণি বেছে প্রিন্ট করলে ছাত্রের ভর্তি নং ও সিট নংসহ প্রবেশপত্র আসে।", "\"🔢 সিট নং স্বয়ংক্রিয় বরাদ্দ\" দিয়ে শ্রেণির ছাত্রদের সিট নং ক্রমানুসারে দেওয়া যায়।"], "tips": ["তালিকায় নেই এমন শ্রেণি বা বিষয় ড্রপডাউনের \"➕ নতুন যোগ করুন…\" দিয়ে যোগ করুন।"]}, {"id": "seat", "icon": "🪑", "title": "সিট প্ল্যান ও নম্বরপত্র", "tab": "seatPlan", "steps": ["\"সিট প্ল্যান ও নম্বরপত্র\" ট্যাবে কক্ষের নাম, বেঞ্চের কলাম-সারি ও প্রতি বেঞ্চে কতজন বসবে লিখুন।", "শ্রেণি বেছে \"🖨 সিট প্ল্যান প্রিন্ট\" দিন। ছাত্র বেশি হলে পরের কক্ষের পাতা নিজে তৈরি হয়। \"সব শ্রেণি মিশিয়ে বসান\" টিক দিলে পাশাপাশি আলাদা শ্রেণি বসে।", "\"💾 সিট নং ছাত্রদের তথ্যে সংরক্ষণ\" দিলে প্রবেশপত্রে সিট নং আসবে।", "নিচের \"নম্বরপত্র\" অংশে পরীক্ষা, শ্রেণি, বিষয় ও পূর্ণমান দিয়ে ফাঁকা বা ছাত্রের নামসহ নম্বরপত্র ছাপুন (ভর্তি নং-সহ)।"], "tips": ["ফাঁকা সিট প্ল্যান চাইলে \"ছাত্রের নামসহ\" টিক তুলে দিন।"]}, {"id": "qpaper", "icon": "✍️", "title": "প্রশ্নপত্র তৈরি (শ্রেণি ও কিতাব ভিত্তিক)", "tab": "qpaper", "steps": ["\"প্রশ্নপত্র\" ট্যাবে শ্রেণি ও কিতাব বেছে নিন। কিতাবের তালিকা শ্রেণি অনুযায়ী আসে।", "\"প্রশ্ন ব্যাংকে নতুন প্রশ্ন যোগ করুন\"-এ প্রশ্নের ধরন বেছে প্রতি লাইনে একটি প্রশ্ন লিখুন। বহুনির্বাচনীতে প্রশ্নের পরের ৪ লাইন অপশন, দুই প্রশ্নের মাঝে ফাঁকা লাইন।", "ব্যাংকের তালিকা থেকে যে প্রশ্নগুলো লাগবে টিক দিন। নম্বরের যোগফল পূর্ণমানের সাথে মিলছে কি না ওপরে দেখায়।", "পরীক্ষার নাম, পূর্ণমান, সময়, তারিখ দিয়ে \"🖨 প্রশ্নপত্র প্রিন্ট করুন\" বা \"📝 Word ফাইল\" নিন। আরবি প্রশ্নপত্রের জন্য ভাষা \"আরবি (ডান থেকে বামে)\" বেছে নিন।", "\"📑 প্রস্তুত প্রশ্নপত্র লাইব্রেরি\"-তে তৈরি করা সম্পূর্ণ প্রশ্নপত্র রাখা আছে। 👁 খুলে লেখায় চাপ দিয়ে সম্পাদনা করুন, \"💾 অ্যাপে সংরক্ষণ\" বা প্রিন্ট দিন। ➕ দিয়ে HTML ফাইল থেকেও নতুন প্রশ্নপত্র আনা যায়।"], "tips": ["একই কিতাবের প্রশ্ন বছর বছর ব্যাংকে জমা থাকে, তাই পরের বার সময় বাঁচে।"]}, {"id": "results", "icon": "🎓", "title": "ফলাফল — নম্বর এন্ট্রি থেকে প্রকাশ পর্যন্ত", "tab": "results", "steps": ["\"ফলাফল\" ট্যাবের ওপরের কার্ডে পরীক্ষা ও শ্রেণি বেছে \"📚 বিষয় বাছাই করুন\" চাপুন। যে বিষয়ে পরীক্ষা হয়েছে টিক দিয়ে পূর্ণমান ঠিক করুন।", "\"📋 নম্বরের ছক তৈরি করুন\" দিলে শ্রেণির সব ছাত্র ও সব বিষয়ের ছক আসে। নম্বর লিখুন, অনুপস্থিতের নিচে \"অনু.\" টিক দিন, তারপর \"💾 সংরক্ষণ\"।", "\"⚙️ ফলাফলের নিয়ম\" থেকে বিভাগের শতকরা সীমা (মুমতাজ, জা: জিদ্দান, জায়্যিদ, মাকবুল) আপনার বোর্ডের নিয়ম অনুযায়ী ঠিক করুন। এর নিচে হলে রাসিব।", "\"ফলাফল প্রকাশ ও প্রিন্ট\" অংশে পরীক্ষা ও শ্রেণি বেছে ফলাফল শীট, মেধা তালিকা, সকল ছাত্রের মার্কশীট ও ফলাফল ঘোষণা ছাপুন।", "\"📣 ফলাফল প্রকাশ করুন\" চাপলে অভিভাবকরা পোর্টালে ফলাফল দেখতে পান। প্রকাশের আগে দেখেন না। ভুল হলে \"প্রকাশ বাতিল\"।"], "tips": ["কোনো ছাত্রের একটি বিষয়ের নম্বর বাকি থাকলে সে \"নম্বর বাকি\" দেখায় এবং মার্কশীট ও মেধাক্রম থেকে বাদ যায়। ঐচ্ছিক বিষয় থাকলে ফলাফলের নিয়মে \"এন্ট্রি নেই এমন বিষয় বাদ দিয়ে হিসাব করুন\" টিক দিন।", "\"প্রতি বিষয়ে আলাদা পাস নম্বর\" টিক না দিলে বিভাগ শুধু মোট শতকরা নম্বর দিয়ে ঠিক হয়।", "ফলাফল শীটে বিষয়ের নাম খাড়া করে লেখা হয় এবং নিচে পূর্ণমান থাকে।"]}, {"id": "certs", "icon": "🏅", "title": "সনদ, প্রশংসাপত্র ও ট্রান্সক্রিপ্ট", "tab": "certs", "steps": ["\"সনদ ও প্রশংসাপত্র\" ট্যাবে ছাত্র বেছে পরীক্ষা, শিক্ষাবর্ষ, তারিখ ও স্বাক্ষরের পদবী দিন।", "\"একজনের সনদ\" বা \"শ্রেণির সকল উত্তীর্ণ ছাত্রের সনদ\" ছাপুন। সনদে শতকরা নম্বর, বিভাগ ও মেধাক্রম ফলাফল থেকে আসে।", "প্রশংসাপত্রের কারণ ড্রপডাউন থেকে বাছুন বা নিজে লিখুন। \"শ্রেণির শীর্ষ ৩ জনের প্রশংসাপত্র\" বাটনে মেধা তালিকার প্রথম তিনজনেরটা একসাথে হয়।", "\"একত্র ট্রান্সক্রিপ্ট\" বাটনে ছাত্রের সব পরীক্ষার ফলাফল এক পাতায় ছাপা হয়।", "প্রিন্ট লেআউটে \"এক পাতায় ২টি সনদ\" (A4 খাড়া) অথবা \"১টি\" বেছে নিন। একই ছাত্রের একই সনদ আবার ছাপলে একই নম্বর থাকে।"], "tips": ["ফলাফল ট্যাবেও \"উত্তীর্ণদের সনদপত্র\" ও \"শীর্ষ ৩ জনের প্রশংসাপত্র\" বাটন আছে।", "অনুত্তীর্ণ বা নম্বর বাকি ছাত্রের সনদ হয় না। কেন বাদ গেল তা অ্যাপ বার্তায় জানায়।"]}, {"id": "notice", "icon": "📢", "title": "নোটিস, কার্যকরী কমিটি ও কল বিজ্ঞপ্তি", "tab": "notices", "steps": ["\"নোটিস\" ট্যাবে টেমপ্লেট (পরীক্ষা, ছুটি, বেতন আদায়, কমিটির সভা) বেছে লেখা ঠিক করুন। প্রয়োজনে ফি তালিকা, স্বাক্ষরকারীর নাম ও পদবী দিন। সংরক্ষণ করলেই প্রিন্ট খোলে, পরেও 🖨 বা 📝 (Word) দিয়ে আবার নেওয়া যায়।", "\"কার্যকরী কমিটি\" ট্যাবে সদস্য একে একে যোগ করুন, অথবা \"সব সদস্য একসাথে পেস্ট করুন\" বক্সে তালিকা পেস্ট করে \"দেখে নিন\" ও \"যোগ করুন\" দিন (Excel/Word থেকে কপি করা তালিকাও চলে)।", "কমিটির সভার নোটিসে \"কার্যকরী কমিটির সদস্যদের তালিকা যুক্ত করুন\" টিক দিলে নিচে বিতরণ তালিকা আসে।", "\"কল ও ভয়েস বিজ্ঞপ্তি\"-তে বার্তা লিখুন বা নোটিস থেকে নিন। প্রাপক (কমিটি, শিক্ষক বা অভিভাবক) বেছে \"কল তালিকা তৈরি করুন\" দিন, তারপর \"📞 পরবর্তী জনকে কল\" চাপুন; ডায়ালার খুলবে।", "\"🔊 পড়ে শোনান\" বাটনে ফোন বার্তা পড়ে শোনায়। \"🎙 রেকর্ড\" দিয়ে নিজের কণ্ঠে বিজ্ঞপ্তি রেকর্ড করে WhatsApp গ্রুপে শেয়ার করা যায়।"], "tips": ["সবাইকে একসাথে নিজে থেকে ফোন করা (অটো-কল) অ্যাপ থেকে হয় না, তাই একে একে কল দেওয়ার ব্যবস্থা।", "বাংলা পড়ে শোনানোর জন্য ফোনে Google বাংলা Text-to-speech ভয়েস ইনস্টল থাকতে হয়।"]}, {"id": "books", "icon": "📚", "title": "কিতাব লাইব্রেরি", "tab": "books", "steps": ["\"কিতাব লাইব্রেরি\"-তে কওমী কিতাবের PDF লিংক স্তর অনুযায়ী সাজানো আছে। \"📄 খুলুন\" চাপলে লিংক খোলে (ইন্টারনেট লাগবে)।", "নিজের কাছে থাকা PDF লিংক \"➕ নিজের পিডিএফ লিংক যোগ করুন\" ফর্মে রাখুন।", "\"কিতাবের নাম ধরে PDF খুঁজুন\" অংশে স্তর বেছে কিতাবের নামের পাশে Archive.org বা Google খোঁজার বাটন আছে।"], "tips": ["লিংকগুলো অন্যের আপলোড করা। ব্যবহারের আগে অনুমতি ও কপিরাইট দেখে নিন।"]}, {"id": "export", "icon": "📤", "title": "Excel ও Word-এ নামানো", "tab": "students", "steps": ["যেসব পাতায় 🖨 প্রিন্ট বাটন আছে তার পাশে \"📤 Excel/Word\" বাটন আছে। চাপলে Excel (.xlsx), Word (.docx) বা CSV বেছে নেওয়া যায়।", "ফলাফল শীট, মেধা তালিকা, রুটিন ছক, নম্বরপত্র, সিট প্ল্যান তালিকা ও কল তালিকাও Excel/Word-এ নেওয়া যায়।", "নোটিস ও প্রশ্নপত্রের Word ফাইল সম্পাদনার জন্য নামানো যায়।"], "tips": ["Google Sheets-এ নিতে .xlsx ফাইল Google Drive-এ আপলোড করে \"Google Sheets দিয়ে খুলুন\" দিন।", "Excel-এ টাকার ঘরগুলো সংখ্যা হিসেবে আসে, তাই যোগফল বের করা যায়।"]}, {"id": "users", "icon": "👤", "title": "ব্যবহারকারী ও লগইন (মোবাইল নম্বর / Gmail)", "tab": "users", "steps": ["মেনু থেকে \"ব্যবহারকারী ও লগইন\" খুলুন (শুধু অ্যাডমিন বা মালিক দেখতে পান)।", "নাম, ভূমিকা (অ্যাডমিন, অফিস সহকারী, হিসাবরক্ষক, শিক্ষক), মোবাইল নম্বর ও ৪-৮ সংখ্যার কোড দিয়ে ব্যবহারকারী যোগ করুন। Gmail দিয়ে প্রবেশ করাতে চাইলে Gmail ঘরেও ঠিকানা দিন। মোবাইল-কোড ছাড়া শুধু Gmail দিয়েও যোগ করা যায়।", "ব্যবহারকারী যোগ হলে লগইন পর্দায় \"মোবাইল নম্বর ও কোড\" চাইবে। নিজের নম্বর (বাংলা বা ইংরেজি অঙ্কে) ও কোড দিয়ে প্রবেশ করুন। ভূমিকা অনুযায়ী শুধু অনুমোদিত বিভাগ মেনুতে দেখা যায়।", "মালিক সবসময় লগইন পর্দার নিচের \"মূল গোপন কোড দিয়ে প্রবেশ (মালিক)\" লিংকে আগের কোড দিয়ে ঢুকতে পারেন।", "কোড ভুলে গেলে অ্যাডমিন \"🔑 কোড রিসেট\" দিয়ে নতুন কোড দেন। নিজের কোড বদলাতে ওপরের \"🔑 কোড পরিবর্তন\" বাটন চাপুন।", "Google (Gmail) লগইন চালু করতে একবার Google Cloud Console থেকে একটি Client ID বানিয়ে ওই ট্যাবের \"Google লগইন সেটআপ\" অংশে বসাতে হয় (ধাপগুলো সেখানেই লেখা আছে)। এরপর লগইন পর্দায় Google বাটন আসে।"], "tips": ["Google লগইনে ইন্টারনেট লাগে। না থাকলে মোবাইল নম্বর ও কোড দিয়ে ঢুকুন।", "এই লগইন ফোনেই যাচাই হয়, মোবাইলে SMS/OTP যায় না। ফোন বা ব্যাকআপ ফাইল অন্যের হাতে গেলে সুরক্ষা সীমিত, তাই নিরাপদে রাখুন।", "হিসাবরক্ষক আর্থিক বিভাগ দেখেন, শিক্ষক আর্থিক হিসাব দেখতে পান না।"]}, {"id": "backup", "icon": "🔐", "title": "ব্যাকআপ ও নিরাপত্তা", "tab": "dashboard", "steps": ["ওপরের \"⬇ ব্যাকআপ / Drive / OneDrive\" বাটনে চাপ দিয়ে ব্যাকআপ ফাইল নামান। ফাইলটি Google Drive বা নিরাপদ জায়গায় রাখুন।", "ফোন বদলালে বা তথ্য মুছে গেলে \"⬆ ব্যাকআপ ইমপোর্ট\" দিয়ে ফাইলটি ফিরিয়ে আনুন।", "অ্যাপ অন্যের হাতে দেওয়ার আগে \"🔒 লক করুন\" দিন। \"🔑 কোড পরিবর্তন\"-এ গোপন কোড বদলানো যায়।", "\"অ্যাক্টিভিটি লগ\"-এ রশিদ, ভাউচার ও হিসাবে যোগ-মোছার ইতিহাস দেখা যায়।"], "tips": ["সপ্তাহে অন্তত একবার ব্যাকআপ নিন। বড় কাজের (ফলাফল প্রকাশ, আইডি বদল) আগে অবশ্যই নিন।", "ব্রাউজারের ডেটা মুছলে অ্যাপের তথ্যও মুছে যেতে পারে, ব্যাকআপ থাকলে ভয় নেই।"]}, {"id": "online", "icon": "☁️", "title": "অনলাইন সিঙ্ক ও অভিভাবক পোর্টাল", "tab": "onlineSync", "steps": ["\"অনলাইন সিঙ্ক\" ট্যাবে সেটআপ নির্দেশিকা অনুযায়ী ফায়ারবেস প্রজেক্টের তথ্য একবার বসান।", "সিঙ্ক চালু হলে অভিভাবক মোবাইল নম্বর (চাইলে ছাত্র আইডিসহ) দিয়ে হাজিরা, প্রকাশিত ফলাফল ও বেতনের অবস্থা দেখতে পারেন।", "\"বিকাশ/নগদ সেটিংস\"-এ আপনার বিকাশ-নগদ নম্বর দিন; অভিভাবক পেমেন্ট জানালে \"পেমেন্ট যাচাই\"-এ নিজের অ্যাপে টাকা পাওয়া নিশ্চিত হয়ে তবেই অনুমোদন করুন।"], "tips": ["সিঙ্ক চালু থাকলে ছাত্রের নাম, মোবাইল, হাজিরা, ফলাফল ও ফি গুগল ফায়ারবেসে যায়। অভিভাবকদের জানিয়ে রাখুন।", "ফলাফল \"প্রকাশ\" না করা পর্যন্ত অভিভাবক পোর্টালে দেখা যায় না।"]}, {"id": "print", "icon": "🖨", "title": "ভালো প্রিন্টের টিপস", "tab": "dashboard", "steps": ["প্রিন্ট ডায়ালগে কাগজ A4 বেছে নিন। সবুজ হেডার, বর্ডার ও জলছাপ আনতে \"Background graphics\" (ব্যাকগ্রাউন্ড গ্রাফিক্স) চালু রাখুন।", "কাগজের মাপ A4 রাখুন এবং স্কেল \"Default\" বা ১০০% রাখুন। লেখা বেশি ছোট হয়ে গেলে \"Margins\" কমিয়ে দেখুন।", "পপ-আপ ব্লক থাকলে প্রিন্ট উইন্ডো খুলবে না। ব্রাউজারে এই সাইটের জন্য পপ-আপ অনুমতি দিন।", "আরবি নাম ও আরবি প্রশ্নপত্রের সুন্দর ফন্ট (Aref Ruqaa, Amiri) ইন্টারনেট থেকে আসে। ইন্টারনেট না থাকলে ফোনের নিজস্ব ফন্টে ছাপা হবে।", "ফোনে সরাসরি প্রিন্টার না থাকলে প্রিন্ট ডায়ালগ থেকে \"PDF হিসেবে সংরক্ষণ করুন\" বেছে PDF বানিয়ে অন্য ডিভাইস থেকে ছাপুন।"], "tips": ["ছোট কাগজ (আইডি কার্ড, প্রবেশপত্র) ছাপার আগে একবার প্রিন্ট প্রিভিউ দেখুন।"]}, {"id": "faq", "icon": "🛠", "title": "সমস্যা হলে কী করবেন", "tab": "dashboard", "steps": ["নতুন সুবিধা বা পরিবর্তন দেখা যাচ্ছে না: অ্যাপ পুরোপুরি বন্ধ করে আবার খুলুন, দুবার খুলুন। তবু না হলে ব্রাউজারে সাইটের লিংক খুলে রিফ্রেশ করুন।", "সনদ, মার্কশীট বা মেধাক্রম আসছে না: ফলাফল ট্যাবে সঠিক পরীক্ষা ও শ্রেণি বাছা আছে কি না দেখুন। কোনো বিষয়ের নম্বর বাকি থাকলে সে \"নম্বর বাকি\" হয়।", "প্রিন্টে রং বা হেডার আসছে না: প্রিন্ট ডায়ালগে \"Background graphics\" চালু করুন।", "প্রিন্ট উইন্ডো খুলছে না: পপ-আপ অনুমতি দিন।", "তথ্য হারিয়ে গেছে: ব্যাকআপ ইমপোর্ট দিন। সেজন্যই নিয়মিত ব্যাকআপ জরুরি।", "গোপন কোড ভুলে গেছেন: কোড পুনরুদ্ধারের ব্যবস্থা নেই। ব্যাকআপ ফাইল থাকলে নতুন করে অ্যাপ সেটআপ করে ইমপোর্ট দিন।", "ভয়েস পড়ে শোনানো বা রেকর্ড হচ্ছে না: ব্রাউজারের মাইক্রোফোন অনুমতি দিন; বাংলা ভয়েস ইনস্টল আছে কি দেখুন।"], "tips": []}];
+
+function guideSectionHTML(g, i){
+  return `<details data-guide-sec style="border:1px solid #D7DDCB;border-radius:12px;padding:0 12px;margin-bottom:8px;background:#fff;">
+    <summary style="cursor:pointer;font-weight:700;padding:11px 0;line-height:1.5;">${g.icon} ${bn(i + 1)}. ${esc(g.title)}</summary>
+    <ol style="margin:4px 0 8px;padding-left:20px;line-height:1.85;font-size:14.5px;">${g.steps.map(x => `<li style="margin-bottom:4px;">${esc(x)}</li>`).join("")}</ol>
+    ${g.tips.length ? `<div style="background:#FBF3D5;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:13.5px;line-height:1.8;">${g.tips.map(t => `💡 ${esc(t)}`).join("<br>")}</div>` : ""}
+    ${g.tab ? `<button class="btn ghost small" type="button" data-guide-go="${g.tab}" style="margin-bottom:10px;">এই বিভাগ খুলুন ➜</button>` : ""}
+  </details>`;
+}
+function renderGuideTab(){
+  return `
+    <div class="sec-head"><div class="badge">📖</div><div><h2>ব্যবহার নির্দেশিকা</h2><p>Our Madrasa অ্যাপ ধাপে ধাপে ব্যবহারের গাইড</p></div></div>
+    <div class="arch form-card">
+      <strong>🚀 প্রথম দিনে এই ৮টি কাজ করুন</strong>
+      <ol style="margin:8px 0 0;padding-left:20px;line-height:2;font-size:14.5px;">${GUIDE_QUICK.map(q => `<li><a href="#" data-guide-go="${q[1]}" style="color:#14432A;font-weight:600;">${esc(q[0])} ➜</a></li>`).join("")}</ol>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <input id="guideSearch" type="search" placeholder="🔍 গাইডে খুঁজুন (যেমনঃ সনদ, ব্যাকআপ, প্রিন্ট…)" style="width:100%;padding:11px;border:1px solid #C9CFC0;border-radius:10px;font-family:inherit;font-size:15px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn ghost small" type="button" data-action="guide-open-all">সব খুলুন</button>
+        <button class="btn ghost small" type="button" data-action="guide-close-all">সব বন্ধ করুন</button>
+        <button class="btn ghost small" type="button" data-action="guide-print">🖨 গাইড প্রিন্ট/PDF</button>
+        <button class="btn ghost small" type="button" data-action="guide-word">📝 Word</button>
+      </div>
+    </div>
+    <div id="guideList" style="margin-top:10px;">${GUIDE_SECTIONS.map(guideSectionHTML).join("")}<div id="guideEmpty" class="empty" style="display:none;">কিছু পাওয়া যায়নি।</div></div>`;
+}
+function guideHTML(){
+  const body = GUIDE_SECTIONS.map((g, i) => `<section class="gs">
+    <h2>${g.icon} ${bn(i + 1)}. ${esc(g.title)}</h2>
+    <ol>${g.steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>
+    ${g.tips.length ? `<div class="tip">${g.tips.map(t => `💡 ${esc(t)}`).join("<br>")}</div>` : ""}
+  </section>`).join("");
+  return `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>Our Madrasa — ব্যবহার নির্দেশিকা</title>
+  <style>
+    @page{size:A4 portrait;margin:12mm 14mm;}
+    ${FANCY_HEADER_CSS}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#1F2A1C;margin:0;font-size:14.5px;line-height:1.8;}
+    h2{font-size:18px;color:#14432A;border-bottom:2px solid #C9A227;padding-bottom:3px;margin:18px 0 6px;page-break-after:avoid;}
+    ol{margin:4px 0 8px;padding-left:22px;} li{margin-bottom:4px;}
+    .tip{background:#FBF3D5;border-radius:8px;padding:6px 12px;font-size:13.5px;margin:6px 0 10px;page-break-inside:avoid;}
+    .gs{page-break-inside:auto;} .quick{border:1.5px solid #14432A;border-radius:10px;padding:8px 14px;margin:10px 0;background:#F4FAEF;page-break-inside:avoid;}
+    .quick b{color:#14432A;} .foot{text-align:center;color:#666;font-size:12px;margin-top:20px;}
+    @media screen{ body{padding:12px;max-width:820px;margin:0 auto;} }
+  </style></head><body>
+    ${fancyHeaderHTML({ title: "Our Madrasa — ব্যবহার নির্দেশিকা" })}
+    <p>এই গাইডে অ্যাপের প্রতিটি বিভাগ কীভাবে ব্যবহার করবেন তা ধাপে ধাপে দেওয়া আছে। অ্যাপ ইন্টারনেট ছাড়াই চলে এবং সব তথ্য আপনার ফোনেই থাকে।</p>
+    <div class="quick"><b>🚀 প্রথম দিনে এই ৮টি কাজ করুন:</b><ol>${GUIDE_QUICK.map(q => `<li>${esc(q[0])}</li>`).join("")}</ol></div>
+    ${body}
+    <div class="foot">Our Madrasa • ${esc(getBrandTitle())} • ${fmtDate(todayISO())}</div>
+  </body></html>`;
+}
+function exportGuideWord(){
+  let b = docPara("Our Madrasa — ব্যবহার নির্দেশিকা", { align: "center", b: true, sz: 32, after: 80 });
+  b += docPara("এই গাইডে অ্যাপের প্রতিটি বিভাগ ধাপে ধাপে ব্যাখ্যা করা হয়েছে।", { align: "center", sz: 22, after: 120 });
+  b += docPara("প্রথম দিনে এই ৮টি কাজ করুন:", { b: true, sz: 26, color: "14432A", after: 40 });
+  GUIDE_QUICK.forEach((q, i) => { b += docPara(bn(i + 1) + ". " + q[0], { sz: 24, after: 20 }); });
+  GUIDE_SECTIONS.forEach((g, i) => {
+    b += docPara(g.icon + " " + bn(i + 1) + ". " + g.title, { b: true, sz: 28, color: "14432A", before: 200, after: 60, border: true });
+    g.steps.forEach((x, k) => { b += docPara(bn(k + 1) + ". " + x, { sz: 24, after: 50 }); });
+    g.tips.forEach(t => { b += docPara("💡 " + t, { sz: 22, after: 50, color: "7A5C00" }); });
+  });
+  saveBlob(buildDocx({ blocks: b, noLetterhead: false }), "Our-Madrasa-ব্যবহার-নির্দেশিকা.docx");
+}
+
+/* ============================ মোবাইল নম্বর + কোড লগইন, ব্যবহারকারী ও ভূমিকা ============================ */
+const SHA_K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+function sha256(str){
+  const bytes = new TextEncoder().encode(str);
+  const l = bytes.length;
+  const buf = new Uint8Array(((l + 9 + 63) >> 6) << 6);
+  buf.set(bytes); buf[l] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(buf.length - 4, (l * 8) >>> 0);
+  dv.setUint32(buf.length - 8, Math.floor(l * 8 / 4294967296));
+  let H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const w = new Uint32Array(64);
+  for(let i = 0; i < buf.length; i += 64){
+    for(let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j * 4);
+    for(let j = 16; j < 64; j++){
+      const a = w[j - 15], b = w[j - 2];
+      const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+      const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+      w[j] = (w[j - 16] + s0 + w[j - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for(let j = 0; j < 64; j++){
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + SHA_K[j] + w[j]) >>> 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H = [(H[0] + a) >>> 0, (H[1] + b) >>> 0, (H[2] + c) >>> 0, (H[3] + d) >>> 0, (H[4] + e) >>> 0, (H[5] + f) >>> 0, (H[6] + g) >>> 0, (H[7] + h) >>> 0];
+  }
+  return H.map(x => x.toString(16).padStart(8, "0")).join("");
+}
+function randSalt(){ const a = new Uint8Array(12); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => a[i] = Math.floor(Math.random() * 256)); return [...a].map(x => x.toString(16).padStart(2, "0")).join(""); }
+function hashUserCode(code, salt){ let h = sha256(salt + ":" + code); for(let i = 0; i < 1200; i++) h = sha256(h + salt); return h; }
+
+const ROLE_DEFS = {
+  admin:      { label: "প্রধান / অ্যাডমিন", note: "সব বিভাগ ও সেটিংস, ব্যাকআপ, ব্যবহারকারী ব্যবস্থাপনা" },
+  office:     { label: "অফিস সহকারী", deny: ["users","onlineSync","paymentSettings","brandingSettings","activityLog"], note: "ছাত্র, হিসাব, ফলাফল, নোটিস সবই — শুধু সেটিংস, সিঙ্ক, অ্যাক্টিভিটি লগ ও ব্যবহারকারী বাদে" },
+  accountant: { label: "হিসাবরক্ষক", allow: ["dashboard","guide","income","expense","fixedAssets","movableAssets","library","libraryLoans","boardingAccounts","students","fees","boardingBills","teacherSalary","patrons","badriMonthly","badriAnnual","paymentClaims","monthlyReport","notices"], note: "আয়-ব্যয়, বেতন, বিল, রশিদ ও ছাত্র তালিকা" },
+  teacher:    { label: "শিক্ষক", allow: ["guide","students","attendance","boardingAttendance","classRoutine","examRoutine","qpaper","seatPlan","books","results","certs","notices"], note: "ছাত্র, হাজিরা, রুটিন, প্রশ্নপত্র, ফলাফল ও সনদ — আর্থিক হিসাব দেখতে পারেন না" }
+};
+let currentUser = null;
+let lockLoginMode = "user";
+let guardianCandidates = [];
+function activeUsers(){ return (db.users || []).filter(u => u.active !== false && (u.hash || u.email)); }
+function codeUsers(){ return (db.users || []).filter(u => u.active !== false && u.hash && u.mobile); }
+function normEmail(e){
+  let x = String(e || "").trim().toLowerCase();
+  const m = x.match(/^([^@]+)@(gmail\.com|googlemail\.com)$/);
+  if(m) x = m[1].replace(/\+.*$/, "").replace(/\./g, "") + "@gmail.com";
+  return x;
+}
+function googleClientId(){ return ((db.googleLogin || {}).clientId || "").trim(); }
+function googleReady(){ return !!googleClientId() && activeUsers().some(u => u.email); }
+const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+function b64urlToBytes(str){ let t = str.replace(/-/g, "+").replace(/_/g, "/"); t += "=".repeat((4 - t.length % 4) % 4); const bin = atob(t); return Uint8Array.from(bin, c => c.charCodeAt(0)); }
+function b64urlToJson(str){ return JSON.parse(new TextDecoder().decode(b64urlToBytes(str))); }
+async function verifyGoogleIdToken(token, clientId){
+  const parts = String(token || "").split(".");
+  if(parts.length !== 3) throw new Error("টোকেন সঠিক নয়");
+  const header = b64urlToJson(parts[0]), payload = b64urlToJson(parts[1]);
+  if(header.alg !== "RS256") throw new Error("টোকেনের ধরন সঠিক নয়");
+  if(["accounts.google.com", "https://accounts.google.com"].indexOf(payload.iss) < 0) throw new Error("টোকেন Google থেকে আসেনি");
+  if(payload.aud !== clientId) throw new Error("এই টোকেন এই অ্যাপের জন্য নয় (Client ID মেলেনি)");
+  if(!payload.exp || payload.exp < Math.floor(Date.now() / 1000) - 60) throw new Error("টোকেনের মেয়াদ শেষ");
+  if(payload.email_verified !== true && payload.email_verified !== "true") throw new Error("Gmail যাচাই করা নয়");
+  if(!(window.crypto && crypto.subtle)) throw new Error("এই ব্রাউজারে নিরাপদ যাচাই চালু নেই (https লাগবে)");
+  const res = await fetch(GOOGLE_CERTS_URL);
+  const jwks = await res.json();
+  const jwk = (jwks.keys || []).find(k => k.kid === header.kid);
+  if(!jwk) throw new Error("Google-এর চাবি পাওয়া যায়নি");
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64urlToBytes(parts[2]), new TextEncoder().encode(parts[0] + "." + parts[1]));
+  if(!ok) throw new Error("টোকেনের স্বাক্ষর মেলেনি");
+  return payload;
+}
+async function googleLoginCallback(resp){
+  const cid = googleClientId();
+  try{
+    const pl = await verifyGoogleIdToken(resp && resp.credential, cid);
+    const email = normEmail(pl.email);
+    const u = activeUsers().find(x => x.email && normEmail(x.email) === email);
+    if(!u){ showLockOverlay("unlock", "এই Gmail (" + pl.email + ") অনুমোদিত নয়। অ্যাডমিনকে আপনার Gmail যোগ করতে বলুন।"); return; }
+    currentUser = { id: u.id, name: u.name, role: u.role, mobile: u.mobile, email: pl.email };
+    hideLockOverlay();
+    logActivity("Google লগইন", u.name);
+    afterUserLogin();
+  }catch(err){
+    showLockOverlay("unlock", "Google লগইন করা যায়নি: " + (err && err.message ? err.message : err));
+  }
+}
+function loadGsi(){
+  return new Promise((res, rej) => {
+    if(window.google && google.accounts && google.accounts.id){ res(); return; }
+    const old = document.getElementById("gsiScript");
+    const sc = old || document.createElement("script");
+    sc.id = "gsiScript"; sc.src = "https://accounts.google.com/gsi/client"; sc.async = true;
+    sc.onload = () => res(); sc.onerror = () => rej(new Error("offline"));
+    if(!old) document.head.appendChild(sc);
+    setTimeout(() => rej(new Error("timeout")), 8000);
+  });
+}
+async function setupGoogleButton(){
+  const box = document.getElementById("gsiBtn");
+  if(!box || !googleReady()) return;
+  const status = document.getElementById("gsiStatus");
+  try{
+    await loadGsi();
+    google.accounts.id.initialize({ client_id: googleClientId(), callback: googleLoginCallback, auto_select: false });
+    google.accounts.id.renderButton(box, { theme: "outline", size: "large", text: "signin_with", locale: "bn", width: 280 });
+    if(status) status.textContent = "";
+  }catch(e){
+    if(status) status.textContent = "ইন্টারনেট না থাকায় Google লগইন এখন বন্ধ। মোবাইল নম্বর/কোড দিয়ে প্রবেশ করুন।";
+  }
+}
+function canAccessTab(id){
+  const u = currentUser;
+  if(!u || u.id === "owner" || u.role === "admin") return true;
+  if(id === "users") return false;
+  const d = ROLE_DEFS[u.role] || ROLE_DEFS.teacher;
+  if(d.allow) return d.allow.includes(id);
+  if(d.deny) return !d.deny.includes(id);
+  return true;
+}
+function firstAllowedTab(){ const n = NAV.find(x => canAccessTab(x.id)); return n ? n.id : "guide"; }
+function applyUserToShell(){
+  const u = currentUser;
+  const isAdmin = !u || u.role === "admin" || u.id === "owner";
+  ["exportBtn", "importBtn"].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = isAdmin ? "" : "none"; });
+  let el = document.getElementById("sidebarUser");
+  const anchor = document.getElementById("sidebarBrandSub");
+  if(!el && anchor){ el = document.createElement("p"); el.id = "sidebarUser"; el.style.cssText = "margin:6px 0 0;font-size:12.5px;color:#F1DC8B;"; anchor.insertAdjacentElement("afterend", el); }
+  if(el) el.textContent = !u ? "" : (u.id === "owner" ? "👤 মালিক (অ্যাডমিন)" : "👤 " + u.name + " — " + ((ROLE_DEFS[u.role] || {}).label || ""));
+}
+function afterUserLogin(){
+  if(!canAccessTab(currentTab)) currentTab = firstAllowedTab();
+  renderContent();
+  applyUserToShell();
+  try{ if(!currentUser || currentUser.role === "admin" || currentUser.id === "owner"){ checkBackupReminder(); checkDailyBackupPrompt(); } }catch(e){}
+}
+function userChangeCode(){
+  const u = (db.users || []).find(x => x.id === (currentUser || {}).id);
+  if(!u) return;
+  const old = prompt("বর্তমান কোড লিখুন");
+  if(old === null) return;
+  if(hashUserCode(old, u.salt) !== u.hash){ alert("বর্তমান কোড সঠিক নয়।"); return; }
+  const n1 = prompt("নতুন কোড লিখুন (৪-৮ সংখ্যা)");
+  if(n1 === null) return;
+  if(!/^[0-9]{4,8}$/.test(n1)){ alert("কোড অবশ্যই ৪-৮ সংখ্যার হতে হবে।"); return; }
+  const n2 = prompt("নতুন কোড আবার লিখুন");
+  if(n1 !== n2){ alert("দুটি কোড মিলছে না।"); return; }
+  u.salt = randSalt(); u.hash = hashUserCode(n1, u.salt); saveDB();
+  alert("কোড পরিবর্তন করা হয়েছে।");
+}
+function renderUsersTab(){
+  const list = db.users || [];
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  const rows = list.length ? list.map(u => `
+    <div style="border:1px solid #D7DDCB;border-radius:10px;padding:9px 12px;margin-bottom:7px;background:#fff;${u.active === false ? "opacity:.6;" : ""}">
+      <div style="font-weight:700;">${esc(u.name)} <span style="font-size:12px;background:#EEF2E8;border-radius:10px;padding:1px 9px;color:#14432A;">${esc((ROLE_DEFS[u.role] || {}).label || u.role)}</span>${u.active === false ? ` <span style="color:#B3261E;font-size:12px;">(বন্ধ)</span>` : ""}</div>
+      <div style="font-size:13px;margin:2px 0 6px;">${u.mobile ? "📱 " + esc(u.mobileRaw || u.mobile) : "📱 —"} &nbsp; ${u.email ? "✉️ " + esc(u.email) : ""}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn ghost small" type="button" data-user-reset="${u.id}">🔑 কোড রিসেট</button>
+        <button class="btn ghost small" type="button" data-user-email="${u.id}">✉️ Gmail</button>
+        <button class="btn ghost small" type="button" data-user-toggle="${u.id}">${u.active === false ? "✅ চালু করুন" : "⏸ বন্ধ করুন"}</button>
+        <button class="del-btn" type="button" data-user-del="${u.id}" title="মুছুন">🗑</button>
+      </div></div>`).join("") : `<div class="empty">এখনো কোনো ব্যবহারকারী যোগ করা হয়নি। এখন শুধু মূল গোপন কোডে প্রবেশ চলে।</div>`;
+  return `
+    <div class="sec-head"><div class="badge">👤</div><div><h2>ব্যবহারকারী ও লগইন</h2><p>মোবাইল নম্বর ও কোড দিয়ে লগইন, ভূমিকা অনুযায়ী অনুমতি</p></div></div>
+    <div class="arch form-card">
+      <strong>➕ নতুন ব্যবহারকারী</strong>
+      <form class="grid" data-form="user" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        ${fld("নাম", `<input name="name" required>`, 2)}
+        ${fld("ভূমিকা", `<select name="role">${Object.keys(ROLE_DEFS).map(k => `<option value="${k}" ${k === "teacher" ? "selected" : ""}>${ROLE_DEFS[k].label}</option>`).join("")}</select>`, 2)}
+        ${fld("মোবাইল নম্বর (লগইনের জন্য)", `<input name="mobile" type="tel" inputmode="tel">`)}
+        ${fld("Gmail (Google লগইনের জন্য)", `<input name="email" type="email" inputmode="email" placeholder="name@gmail.com">`)}
+        ${fld("কোড (৪-৮ সংখ্যা)", `<input name="code" type="password" inputmode="numeric" maxlength="8">`)}
+        ${fld("কোড আবার লিখুন", `<input name="code2" type="password" inputmode="numeric" maxlength="8">`)}
+        <p style="grid-column:span 2;font-size:12px;color:#5B6357;margin:0;">মোবাইল নম্বর ও কোড দিলে সেটি দিয়ে লগইন চলবে; Gmail দিলে Google দিয়েও প্রবেশ করা যাবে। যেকোনো একটি পদ্ধতি দিলেই চলে।</p>
+        <div class="btn-end" style="grid-column:span 2;"><button class="btn" type="submit">➕ যোগ করুন</button></div>
+      </form>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>🔵 Google (Gmail) লগইন সেটআপ ${googleClientId() ? "— ✅ চালু" : ""}</strong>
+      <p style="font-size:12.5px;color:#5B6357;line-height:1.8;margin:6px 0;">Google লগইন চালু করতে একবার একটি "Client ID" লাগে (বিনামূল্যে):<br>
+      ১. console.cloud.google.com → APIs &amp; Services → Credentials → Create credentials → OAuth client ID → Web application।<br>
+      ২. "Authorized JavaScript origins"-এ এই ঠিকানা দিন: <b dir="ltr">${esc(location.origin)}</b><br>
+      ৩. OAuth consent screen-এ অ্যাপের নাম দিয়ে "Publish app" করুন (শুধু Gmail/ইমেইল অনুমতি লাগে)।<br>
+      ৪. তৈরি হওয়া Client ID নিচে পেস্ট করে সংরক্ষণ করুন।</p>
+      <form class="grid" data-form="googleLogin" style="grid-template-columns:1fr;">
+        ${fld("Google Client ID", `<input name="clientId" value="${esc(googleClientId())}" placeholder="1234567890-abc….apps.googleusercontent.com" style="direction:ltr;">`)}
+        <div class="btn-end"><button class="btn small" type="submit">💾 সংরক্ষণ</button></div>
+      </form>
+    </div>
+    <div class="arch" style="margin-top:8px;"><div class="tbl-toolbar"><strong>ব্যবহারকারী তালিকা (${bn(list.length)} জন)</strong></div><div style="padding:10px;">${rows}</div></div>
+    <div class="arch form-card" style="margin-top:8px;">
+      <strong>🔐 ভূমিকা অনুযায়ী অনুমতি</strong>
+      <ul style="margin:8px 0 0;padding-left:18px;line-height:1.9;font-size:14px;">${Object.keys(ROLE_DEFS).map(k => `<li><b>${ROLE_DEFS[k].label}:</b> ${ROLE_DEFS[k].note}</li>`).join("")}</ul>
+      <p style="font-size:12.5px;color:#5B6357;margin:10px 0 0;line-height:1.8;">ব্যবহারকারী যোগ করলে লগইন পর্দায় "মোবাইল নম্বর ও কোড" চাইবে। মালিক সবসময় "মূল গোপন কোড" দিয়ে প্রবেশ করতে পারেন (লগইন পর্দার নিচের লিংক), তাই নিজে আটকে যাবেন না। এই লগইন ফোনেই যাচাই হয়, মোবাইলে SMS/OTP যায় না। ব্যবহারকারীর তথ্য ব্যাকআপ ফাইলে থাকে (কোড এনক্রিপ্ট করা), তাই ফাইল অন্যকে দেবেন না।</p>
+    </div>`;
+}
+
+/* ============================ মাসিক ও বাৎসরিক বদরী — আলাদা প্রোফাইল ও তথ্যবহি ============================ */
+const BADRI_KINDS = ["মাসিক চাঁদা","বাৎসরিক চাঁদা","অনুদান","বিশেষ অনুদান","অন্যান্য"];
+const BADRI_ROWS_PER_PAGE = 22;
+function badriType(tab){ return tab === "badriAnnual" ? "বাৎসরিক" : "মাসিক"; }
+function badriMembers(type){ return db.patronMembers.filter(m => (m.subType || "মাসিক") === type); }
+function badriSerial(m){
+  if(Number(m.serial)) return Number(m.serial);
+  const list = badriMembers(m.subType || "মাসিক"); const i = list.findIndex(x => x.id === m.id);
+  return list.length - i;
+}
+function badriNextSerial(type){ return badriMembers(type).reduce((a, m) => Math.max(a, Number(m.serial) || 0), 0) + 1; }
+function ensureBadriSerials(){
+  let changed = false;
+  ["মাসিক", "বাৎসরিক"].forEach(tp => {
+    const list = badriMembers(tp).slice().reverse();
+    let max = list.reduce((a, m) => Math.max(a, Number(m.serial) || 0), 0);
+    list.forEach(m => { if(!Number(m.serial)){ m.serial = ++max; changed = true; } });
+  });
+  if(changed) saveDB();
+}
+/* সিরিয়াল নং / মোবাইল / নাম দিয়ে খোঁজা */
+function badriSearch(q, type){
+  const raw = String(q || "").trim();
+  if(!raw) return [];
+  const rq = raw.toLowerCase();
+  const en = bnDigitsToEn(raw).replace(/\s+/g, "");
+  const numeric = /^\d+$/.test(en);
+  const pool = type ? badriMembers(type) : [...badriMembers("মাসিক"), ...badriMembers("বাৎসরিক")];
+  const scored = [];
+  pool.forEach(m => {
+    const name = (m.name || "").toLowerCase(), father = (m.fatherName || "").toLowerCase(), mob = bnDigitsToEn(m.mobile || "").replace(/\D/g, "");
+    let score = 0;
+    if(numeric){
+      if(Number(en) === badriSerial(m)) score = 100;
+      else if(en.length >= 3 && mob.includes(en)) score = 60;
+    } else {
+      if(name.startsWith(rq)) score = 80;
+      else if(name.includes(rq)) score = 50;
+      else if(father.includes(rq)) score = 30;
+    }
+    if(score) scored.push([score, m]);
+  });
+  scored.sort((a, b) => b[0] - a[0] || badriSerial(a[1]) - badriSerial(b[1]));
+  return scored.map(x => x[1]);
+}
+function badriDueRows(m){ return db.patronPayments.filter(r => r.memberId === m.id && r.status === "বাকি").sort((a, b) => badriPayKey(a) < badriPayKey(b) ? -1 : 1); }
+/* আদায় লেখার সাধারণ ফাংশন (ফর্ম ও দ্রুত পরিশোধ দুটোই এটি ব্যবহার করে) */
+function badriAddPayments(o){
+  const m = db.patronMembers.find(x => x.id === o.memberId); if(!m) return [];
+  const monthly = (m.subType || "মাসিক") === "মাসিক" && /মাসিক/.test(o.kind);
+  const count = monthly ? Math.min(12, Math.max(1, parseInt(o.count, 10) || 1)) : 1;
+  let mi = Math.max(0, MONTHS_BN.indexOf(o.month)), yr = parseInt(o.year, 10) || new Date().getFullYear();
+  const ids = [];
+  for(let k = 0; k < count; k++){
+    const id = uid(); ids.push(id);
+    db.patronPayments.unshift({ id, memberId: o.memberId, month: o.month ? MONTHS_BN[mi] : "", year: String(yr), amount: String(o.amount), status: o.status, payDate: o.status === "পরিশোধিত" ? o.date : "", entryDate: o.date, kind: o.kind, receiptNo: (o.receiptNo || "").trim() });
+    mi++; if(mi > 11){ mi = 0; yr++; }
+  }
+  logActivity("বদরী আদায়", m.name + " — " + taka(o.amount) + (count > 1 ? " × " + bn(count) + " মাস" : ""));
+  return ids;
+}
+function printBadriReceipt(ids){
+  const pays = ids.map(id => db.patronPayments.find(r => r.id === id)).filter(Boolean);
+  if(!pays.length) return;
+  const m = db.patronMembers.find(x => x.id === pays[0].memberId); if(!m) return;
+  const total = pays.reduce((a, r) => a + Number(r.amount || 0), 0);
+  const kinds = [...new Set(pays.map(r => r.kind || badriKindDefault(m.subType || "মাসিক")))].join(", ");
+  const periods = pays.map(badriPeriod).filter(Boolean).join(", ");
+  printDonationReceipts([{ party: m.name, donorFather: m.fatherName || "", donorAddress: m.address || "", desc: kinds + (periods ? " — " + periods : "") + (pays.some(r => r.status === "বাকি") ? " (বাকি)" : ""), amount: total, date: pays[0].payDate || pays[0].entryDate || todayISO(), no: pays[0].receiptNo || "" }]);
+}
+function badriQuickPanelHTML(m){
+  const dues = badriDueRows(m);
+  const now = new Date(), type = m.subType || "মাসিক";
+  const inp = "padding:7px;border:1px solid #C9CFC0;border-radius:8px;width:100%;font-family:inherit;";
+  return `<div data-bq-panel="${m.id}" style="margin-top:8px;padding:10px;background:#F4FAEF;border:1.5px solid #14432A;border-radius:10px;">
+    <label style="font-size:12.5px;">রশিদ নং <input data-bq-receipt value="${badriNextReceipt()}" style="${inp}"></label>
+    ${dues.length ? `<div style="margin-top:8px;font-weight:700;font-size:13.5px;">বাকি তালিকা (${taka(dues.reduce((a, r) => a + Number(r.amount || 0), 0))})</div>
+      ${dues.map(d => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:13.5px;"><input type="checkbox" data-bq-due="${d.id}" checked style="width:20px;height:20px;flex:0 0 auto;"> <span style="flex:1;">${esc(d.kind || badriKindDefault(type))} — ${esc(badriPeriod(d))}</span><b>${taka(d.amount)}</b></label>`).join("")}
+      <button class="btn small" type="button" data-bq-do-dues="${m.id}" style="margin-top:4px;">✅ বাছাই করা বাকি এখন নগদ আদায় করুন</button>` : `<div style="margin-top:8px;font-size:13px;color:#5B6357;">কোনো বাকি নেই।</div>`}
+    <div style="margin-top:10px;font-weight:700;font-size:13.5px;">➕ নতুন আদায় লিখুন</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px;">
+      <label style="font-size:12px;">তারিখ<input type="date" data-bq-date value="${todayISO()}" style="${inp}"></label>
+      <label style="font-size:12px;">পরিমাণ (টাকা)<input type="number" min="0" data-bq-amount value="${esc(m.amount || "")}" style="${inp}"></label>
+      <label style="font-size:12px;">প্রকার<select data-bq-kind style="${inp}">${BADRI_KINDS.map(k => `<option ${k === badriKindDefault(type) ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+      <label style="font-size:12px;">মাস<select data-bq-month style="${inp}">${MONTHS_BN.map(x => `<option ${x === MONTHS_BN[now.getMonth()] ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+      <label style="font-size:12px;">বছর<input type="number" data-bq-year value="${now.getFullYear()}" style="${inp}"></label>
+      ${type === "মাসিক" ? `<label style="font-size:12px;">কত মাসের জন্য<input type="number" min="1" max="12" data-bq-count value="1" style="${inp}"></label>` : `<div></div>`}
+    </div>
+    <button class="btn small" type="button" data-bq-do-new="${m.id}" style="margin-top:8px;">💾 নতুন আদায় নগদ লিখুন</button>
+  </div>`;
+}
+function renderBadriResults(){
+  const box = document.getElementById("badriResults"); if(!box) return;
+  const bq = miscState.badriQuick || {};
+  let html = "";
+  const last = miscState.badriLast;
+  if(last && last.ids && last.ids.length){
+    html += `<div style="margin:8px 0;padding:8px 12px;background:#E8F5DF;border-radius:10px;font-size:13.5px;">✅ ${esc(last.text)} <button class="btn ghost small" type="button" data-bq-receipt-print="${last.ids.join(",")}" style="margin-left:6px;">🧾 রশিদ প্রিন্ট</button></div>`;
+  }
+  const q = (bq.q || "").trim();
+  if(q){
+    const res = badriSearch(q, null).slice(0, 8);
+    html += res.length ? res.map(m => {
+      const t = badriTotals(m.id), type = m.subType || "মাসিক";
+      return `<div style="border:1px solid #D7DDCB;border-radius:10px;padding:8px 10px;margin-top:8px;background:#fff;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="background:#14432A;color:#fff;border-radius:8px;padding:2px 9px;font-weight:700;">${bn(badriSerial(m))}</span>
+          <b style="flex:1;min-width:120px;">${esc(m.name)}</b>
+          <span style="font-size:11.5px;background:#EEF2E8;border-radius:10px;padding:1px 8px;">${type}</span>
+        </div>
+        <div style="font-size:12.5px;color:#5B6357;margin:3px 0;">${m.mobile ? "📞 " + esc(m.mobile) + " • " : ""}${type} চাঁদা ${m.amount ? taka(m.amount) : "—"} • আদায় ${taka(t.paid)}${t.due ? ` • <b style="color:#B3261E;">বাকি ${taka(t.due)}</b>` : ""}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn small" type="button" data-bq-toggle="${m.id}">💰 টাকা নিন</button><button class="btn ghost small" type="button" data-bq-profile="${m.id}">📖 প্রোফাইল</button></div>
+        ${bq.open === m.id ? badriQuickPanelHTML(m) : ""}
+      </div>`;
+    }).join("") : `<div class="empty" style="margin-top:8px;">কাউকে পাওয়া যায়নি।</div>`;
+  }
+  box.innerHTML = html;
+}
+function badriPayKey(r){
+  if(r.payDate) return r.payDate;
+  if(r.entryDate) return r.entryDate;
+  const mi = Math.max(0, MONTHS_BN.indexOf(r.month));
+  return String(r.year || "0000") + "-" + String(mi + 1).padStart(2, "0") + "-01";
+}
+function badriPays(memberId){ return db.patronPayments.filter(r => r.memberId === memberId).sort((a, b) => badriPayKey(a) < badriPayKey(b) ? -1 : badriPayKey(a) > badriPayKey(b) ? 1 : 0); }
+function badriTotals(memberId){
+  const rows = memberId ? db.patronPayments.filter(r => r.memberId === memberId) : db.patronPayments;
+  const sum = st => rows.filter(r => r.status === st).reduce((a, r) => a + Number(r.amount || 0), 0);
+  return { paid: sum("পরিশোধিত"), due: sum("বাকি") };
+}
+function badriNextReceipt(){
+  const nums = db.patronPayments.map(r => parseInt(bnDigitsToEn(r.receiptNo || ""), 10)).filter(n => !isNaN(n));
+  return String((nums.length ? Math.max(...nums) : 0) + 1);
+}
+function badriKindDefault(type){ return type === "বাৎসরিক" ? "বাৎসরিক চাঁদা" : "মাসিক চাঁদা"; }
+function badriPeriod(r){ return (r.month ? r.month + " " : "") + (r.year ? bn(r.year) : ""); }
+function badriStatusLabel(st){ return st === "পরিশোধিত" ? "নগদ" : "বাকি"; }
+
+function renderBadriTab(tab){
+  ensureBadriSerials();
+  const type = badriType(tab);
+  const prof = miscState.badriProfile ? db.patronMembers.find(m => m.id === miscState.badriProfile) : null;
+  if(prof && (prof.subType || "মাসিক") === type) return renderBadriProfile(prof, type);
+  miscState.badriProfile = "";
+  const q = (miscState.badriQ || "").trim();
+  const all = badriMembers(type);
+  const list = q ? badriSearch(q, type) : all.slice().sort((a, b) => badriSerial(a) - badriSerial(b));
+  setTimeout(renderBadriResults, 0);
+  const ed = miscState.badriEdit ? db.patronMembers.find(m => m.id === miscState.badriEdit) : null;
+  const tot = { paid: 0, due: 0 };
+  all.forEach(m => { const t = badriTotals(m.id); tot.paid += t.paid; tot.due += t.due; });
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  const icon = type === "মাসিক" ? "📅" : "🗓";
+  const cards = list.length ? list.map(m => {
+    const t = badriTotals(m.id), pays = badriPays(m.id), last = pays.filter(r => r.status === "পরিশোধিত").slice(-1)[0];
+    return `<div style="border:1px solid #D7DDCB;border-radius:12px;padding:10px 12px;margin-bottom:8px;background:#fff;">
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        <div style="min-width:30px;font-weight:800;color:#14432A;">${bn(badriSerial(m))}.</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;word-break:break-word;">${esc(m.name)}</div>
+          <div style="font-size:12.5px;color:#5B6357;margin-top:2px;">${m.mobile ? `<a href="tel:${esc(dialNumber(m.mobile))}" style="color:#14432A;">📞 ${esc(m.mobile)}</a> • ` : ""}${esc(type)} চাঁদা ${m.amount ? taka(m.amount) : "—"}${m.address ? " • " + esc(m.address) : ""}</div>
+          <div style="font-size:12.5px;margin-top:4px;">আদায় <b style="color:#14432A;">${taka(t.paid)}</b>${t.due ? ` • বাকি <b style="color:#B3261E;">${taka(t.due)}</b>` : ""}${last ? ` • শেষ আদায় ${fmtDate(last.payDate)}` : ""}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn small" type="button" data-badri-open="${m.id}">📖 তথ্যবহি / প্রোফাইল</button>
+        <button class="btn ghost small" type="button" data-badri-edit="${m.id}">✏️</button>
+      </div></div>`;
+  }).join("") : `<div class="empty">${all.length ? "কিছু পাওয়া যায়নি।" : "এখনো কোনো " + type + " বদরী সদস্য যোগ করা হয়নি।"}</div>`;
+  return `
+    <div class="sec-head"><div class="badge">${icon}</div><div><h2>${type} বদরী</h2><p>${type} বদরী সদস্যদের আলাদা প্রোফাইল ও দাতা তথ্যবহি</p></div></div>
+    <div class="stat-row">
+      <div class="arch stat"><div class="lbl">মোট সদস্য</div><div class="val">${bn(all.length)}</div></div>
+      <div class="arch stat"><div class="lbl">মোট আদায় (নগদ)</div><div class="val" style="color:var(--paid);">${taka(tot.paid)}</div></div>
+      <div class="arch stat"><div class="lbl">মোট বাকি</div><div class="val" style="color:var(--due);">${taka(tot.due)}</div></div>
+    </div>
+    <div class="arch form-card" id="badriQuickBox">
+      <strong>💰 টাকা পরিশোধ — সদস্য খুঁজুন</strong>
+      <input id="badriQuickQ" data-bq-input type="search" value="${esc((miscState.badriQuick || {}).q || "")}" placeholder="সিরিয়াল নং, মোবাইল নম্বর বা নাম লিখুন" style="width:100%;margin-top:8px;padding:12px;border:1.5px solid #14432A;border-radius:10px;font-family:inherit;font-size:16px;">
+      <div style="font-size:12px;color:#5B6357;margin-top:4px;">মাসিক ও বাৎসরিক দুই ধরনের সদস্যের মধ্যেই খোঁজে। সিরিয়াল লিখলে ঠিক সেই নম্বরের সদস্য সবার আগে আসে।</div>
+      <div id="badriResults"></div>
+    </div>
+    <div class="arch form-card" id="badriForm" style="margin-top:8px;">
+      <strong>${ed ? "✏️ সদস্যের তথ্য সম্পাদনা" : "➕ নতুন " + type + " বদরী সদস্য"}</strong>
+      <form class="grid" data-form="badriMember" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        ${fld("নাম", `<input name="name" required value="${ed ? esc(ed.name) : ""}">`)}
+        ${fld("সদস্য নং (সিরিয়াল)", `<input name="serial" type="number" min="1" value="${ed ? esc(badriSerial(ed)) : badriNextSerial(type)}">`)}
+        ${fld("পিতার নাম", `<input name="fatherName" value="${ed ? esc(ed.fatherName || "") : ""}">`)}
+        ${fld("মোবাইল নম্বর", `<input name="mobile" type="tel" inputmode="tel" value="${ed ? esc(ed.mobile || "") : ""}">`)}
+        ${fld("ঠিকানা", `<input name="address" value="${ed ? esc(ed.address || "") : ""}">`, 2)}
+        ${fld(type + " চাঁদার পরিমাণ (টাকা)", `<input name="amount" type="number" min="0" value="${ed ? esc(ed.amount || "") : ""}">`)}
+        ${fld("সদস্য হওয়ার তারিখ", `<input name="joinDate" type="date" value="${ed ? esc(ed.joinDate || todayISO()) : todayISO()}">`)}
+        ${fld("মন্তব্য (ঐচ্ছিক)", `<input name="note" value="${ed ? esc(ed.note || "") : ""}">`, 2)}
+        <div class="btn-end" style="grid-column:span 2;display:flex;gap:8px;"><button class="btn" type="submit">${ed ? "💾 হালনাগাদ করুন" : "➕ যোগ করুন"}</button>${ed ? `<button class="btn ghost" type="button" data-action="badri-cancel-edit">বাতিল</button>` : ""}</div>
+      </form>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <strong>${type} বদরী সদস্যবৃন্দ (${bn(all.length)} জন)</strong>
+        <input data-misc-field="badriQ" value="${esc(miscState.badriQ || "")}" placeholder="🔍 সিরিয়াল/মোবাইল/নাম দিয়ে খুঁজুন" style="flex:1;min-width:150px;">
+      </div>
+      <div style="padding:8px 10px;display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn small" type="button" data-action="badri-print-all">🖨 সবার তথ্যবহি (প্রত্যেকের একটি পূর্ণ পৃষ্ঠা)</button>
+        <button class="btn ghost small" type="button" data-action="badri-print-blank">📄 ফাঁকা তথ্যবহির পৃষ্ঠা</button>
+        <button class="btn ghost small" type="button" data-action="badri-gen-dues">📅 ${type === "মাসিক" ? "চলতি মাসের" : "চলতি বছরের"} বাকি যোগ করুন</button>
+        <button class="btn ghost small" type="button" data-action="badri-export-list">📤 তালিকা (Excel/Word)</button>
+        <button class="btn small" type="button" data-action="badri-delete-all" style="background:#B3261E;border-color:#B3261E;color:#fff;">🗑 সব সদস্য মুছুন</button>
+      </div>
+      <div style="padding:6px 10px;">${cards}</div>
+    </div>`;
+}
+function renderBadriProfile(m, type){
+  const pays = badriPays(m.id), t = badriTotals(m.id);
+  const now = new Date();
+  const fld = (label, inner, span) => `<label class="field" ${span ? `style="grid-column:span ${span};"` : ""}><span>${label}</span>${inner}</label>`;
+  const rows = pays.length ? pays.map((r, i) => `<tr>
+      <td>${bn(i + 1)}</td><td>${r.payDate ? fmtDate(r.payDate) : "—"}</td><td>${esc(r.kind || badriKindDefault(type))}<br><small style="color:#5B6357;">${esc(badriPeriod(r))}</small></td>
+      <td>${taka(r.amount)}</td><td>${esc(r.receiptNo ? bn(r.receiptNo) : "—")}</td>
+      <td><button class="status-chip ${r.status === "বাকি" ? "status-due" : "status-paid"}" data-toggle-status data-coll="patronPayments" data-id="${r.id}">${badriStatusLabel(r.status)}</button></td>
+      <td style="white-space:nowrap;"><button class="del-btn" data-badri-receipt="${r.id}" title="রশিদ প্রিন্ট">🧾</button><button class="del-btn" data-delete="patronPayments" data-id="${r.id}">🗑</button></td></tr>`).join("")
+    : `<tr><td colspan="7" style="text-align:center;color:#5B6357;">এখনো কোনো আদায় লেখা হয়নি।</td></tr>`;
+  const defMonth = MONTHS_BN[now.getMonth()];
+  return `
+    <div style="margin:4px 0 8px;"><button class="btn ghost small" type="button" data-badri-back>← ${type} বদরীর তালিকায় ফিরুন</button></div>
+    <div class="arch form-card">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div>
+          <div style="font-size:11.5px;color:#5B6357;">${type} বদরী — সদস্য নং ${bn(badriSerial(m))}</div>
+          <div style="font-size:19px;font-weight:800;color:#14432A;">${esc(m.name)}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn ghost small" type="button" data-badri-edit="${m.id}">✏️ সম্পাদনা</button><button class="del-btn" type="button" data-badri-del-member="${m.id}" title="সদস্য মুছুন">🗑</button></div>
+      </div>
+      <div style="font-size:13.5px;line-height:1.9;margin-top:6px;">
+        ${m.fatherName ? `পিতা: ${esc(m.fatherName)}<br>` : ""}${m.mobile ? `মোবাইল: <a href="tel:${esc(dialNumber(m.mobile))}" style="color:#14432A;">${esc(m.mobile)}</a><br>` : ""}${m.address ? `ঠিকানা: ${esc(m.address)}<br>` : ""}
+        ${type} চাঁদা: <b>${m.amount ? taka(m.amount) : "—"}</b> • সদস্য হয়েছেন: ${m.joinDate ? fmtDate(m.joinDate) : "—"}${m.note ? `<br>মন্তব্য: ${esc(m.note)}` : ""}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;background:#E8F5DF;border-radius:10px;padding:8px 12px;"><div style="font-size:11.5px;color:#5B6357;">মোট আদায় (নগদ)</div><div style="font-weight:800;color:#14432A;">${taka(t.paid)}</div></div>
+        <div style="flex:1;min-width:120px;background:#FDECEA;border-radius:10px;padding:8px 12px;"><div style="font-size:11.5px;color:#5B6357;">মোট বাকি</div><div style="font-weight:800;color:#B3261E;">${taka(t.due)}</div></div>
+      </div>
+    </div>
+    <div class="arch form-card" style="margin-top:8px;" id="badriPayBox">
+      <strong>➕ আদায় / বাকি লিখুন</strong>
+      <form class="grid" data-form="badriPayment" style="grid-template-columns:repeat(2,1fr);margin-top:8px;">
+        <input type="hidden" name="memberId" value="${m.id}">
+        ${fld("আদায়ের তারিখ", `<input name="date" type="date" value="${todayISO()}">`)}
+        ${fld("প্রকার", `<select name="kind">${BADRI_KINDS.map(k => `<option ${k === badriKindDefault(type) ? "selected" : ""}>${k}</option>`).join("")}</select>`)}
+        ${fld("মাস", `<select name="month">${MONTHS_BN.map(x => `<option ${x === defMonth ? "selected" : ""}>${x}</option>`).join("")}</select>`)}
+        ${fld("বছর", `<input name="year" type="number" value="${now.getFullYear()}">`)}
+        ${fld("পরিমাণ (টাকা)", `<input name="amount" type="number" min="0" step="any" required value="${esc(m.amount || "")}">`)}
+        ${fld("রশিদ নং", `<input name="receiptNo" value="${badriNextReceipt()}">`)}
+        ${fld("নগদ / বাকি", `<select name="status"><option value="পরিশোধিত">নগদ (আদায় হয়েছে)</option><option value="বাকি">বাকি</option></select>`)}
+        ${type === "মাসিক" ? fld("কত মাসের জন্য", `<input name="count" type="number" min="1" max="12" value="1">`) : `<div></div>`}
+        <div class="btn-end" style="grid-column:span 2;"><button class="btn" type="submit">💾 সংরক্ষণ</button></div>
+      </form>
+    </div>
+    <div class="arch" style="margin-top:8px;">
+      <div class="tbl-toolbar" style="flex-wrap:wrap;gap:8px;"><strong>📖 দাতা তথ্যবহি</strong>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn small" type="button" data-action="badri-print-one">🖨 এই পৃষ্ঠা প্রিন্ট</button><button class="btn ghost small" type="button" data-action="badri-export-one">📤 Excel/Word</button></div></div>
+      <div style="overflow-x:auto;"><table><thead><tr><th>ক্রম</th><th>আদায়ের তারিখ</th><th>প্রকার</th><th>পরিমাণ</th><th>রশিদ নং</th><th>নগদ/বাকি</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+}
+function badriBookDoc(items, title){
+  /* items: [{m (member|null), pays:[]}] — প্রত্যেকের জন্য কমপক্ষে একটি পূর্ণ পৃষ্ঠা */
+  const RPP = BADRI_ROWS_PER_PAGE;
+  const pages = [];
+  items.forEach(it => {
+    const pays = it.pays || [];
+    const n = Math.max(1, Math.ceil(pays.length / RPP));
+    for(let p = 0; p < n; p++) pages.push({ m: it.m, pays, slice: pays.slice(p * RPP, (p + 1) * RPP), start: p * RPP, page: p + 1, of: n, type: it.type });
+  });
+  const dots = '<span class="d">&nbsp;</span>';
+  const body = pages.map(pg => {
+    const m = pg.m, t = pg.pays.reduce((a, r) => { if(r.status === "পরিশোধিত") a.paid += Number(r.amount || 0); else a.due += Number(r.amount || 0); return a; }, { paid: 0, due: 0 });
+    const rows = [];
+    for(let i = 0; i < RPP; i++){
+      const r = pg.slice[i];
+      rows.push(r ? `<tr><td>${bn(pg.start + i + 1)}</td><td>${r.payDate ? fmtDate(r.payDate) : ""}</td><td>${esc(r.kind || badriKindDefault(pg.type))}</td><td>${esc(badriPeriod(r))}</td><td>${r.amount ? bn(r.amount) : ""}</td><td>${r.receiptNo ? esc(bn(r.receiptNo)) : ""}</td><td>${badriStatusLabel(r.status)}</td><td></td></tr>`
+        : `<tr><td>${bn(pg.start + i + 1)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`);
+    }
+    const last = pg.page === pg.of;
+    return `<section class="bk">
+      ${fancyHeaderHTML({ title: "দাতা তথ্যবহি — " + pg.type + " বদরী", compact: true })}
+      <div class="info">
+        <div><span>সদস্য নং:</span>${m ? `<b>${bn(badriSerial(m))}</b>` : dots}</div>
+        <div><span>দাতার নাম:</span>${m ? `<b>${esc(m.name)}</b>` : dots}</div>
+        <div><span>পিতার নাম:</span>${m && m.fatherName ? `<b>${esc(m.fatherName)}</b>` : dots}</div>
+        <div><span>মোবাইল:</span>${m && m.mobile ? `<b>${esc(m.mobile)}</b>` : dots}</div>
+        <div class="w2"><span>ঠিকানা:</span>${m && m.address ? `<b>${esc(m.address)}</b>` : dots}</div>
+        <div><span>${pg.type} চাঁদা:</span>${m && m.amount ? `<b>${bn(m.amount)} টাকা</b>` : dots}</div>
+        <div><span>সদস্য হওয়ার তারিখ:</span>${m && m.joinDate ? `<b>${fmtDate(m.joinDate)}</b>` : dots}</div>
+      </div>
+      <table><thead><tr><th style="width:6%">ক্রম</th><th style="width:15%">আদায়ের তারিখ</th><th style="width:15%">প্রকার</th><th style="width:15%">মাস/বছর</th><th style="width:13%">পরিমাণ (৳)</th><th style="width:12%">রশিদ নং</th><th style="width:10%">নগদ/বাকি</th><th style="width:14%">স্বাক্ষর</th></tr></thead><tbody>${rows.join("")}</tbody></table>
+      <div class="ft"><div>${last && m ? `মোট আদায় (নগদ): <b>${bn(t.paid)} টাকা</b> &nbsp;|&nbsp; মোট বাকি: <b>${bn(t.due)} টাকা</b>` : ""}</div><div>পৃষ্ঠা ${bn(pg.page)}/${bn(pg.of)}</div></div>
+      <div class="sg"><div>কোষাধ্যক্ষের স্বাক্ষর</div><div>মুহতামিমের স্বাক্ষর</div></div>
+    </section>`;
+  }).join("");
+  return `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${esc(title || "দাতা তথ্যবহি")}</title>
+  <style>
+    @page{size:A4 portrait;margin:9mm 11mm;}
+    ${FANCY_HEADER_CSS}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans Bengali','Hind Siliguri','Nirmala UI',Arial,sans-serif;color:#1F2A1C;margin:0;}
+    .bk{page-break-after:always;height:277mm;display:flex;flex-direction:column;}
+    .bk:last-child{page-break-after:auto;}
+    .info{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin:4px 0 8px;font-size:13.5px;}
+    .info div{display:flex;gap:6px;border-bottom:1px dotted #333;padding-bottom:2px;min-height:22px;align-items:flex-end;} .info .w2{grid-column:span 2;}
+    .info span{color:#5B6357;white-space:nowrap;} .info .d{flex:1;}
+    table{width:100%;border-collapse:collapse;flex:0 0 auto;}
+    th,td{border:1.3px solid #333;text-align:center;font-size:12.5px;height:8.3mm;padding:0 3px;}
+    th{background:#E8F5DF;font-weight:700;height:9mm;}
+    .ft{display:flex;justify-content:space-between;font-size:13px;margin-top:8px;}
+    .sg{display:flex;justify-content:space-between;margin-top:auto;padding-top:14px;font-size:12.5px;}
+    .sg div{border-top:1px solid #000;padding-top:2px;min-width:52mm;text-align:center;}
+    @media screen{ body{padding:10px;background:#eee;} .bk{background:#fff;margin-bottom:12px;padding:8mm;} }
+  </style></head><body>${body}</body></html>`;
+}
+function badriExportRows(m){
+  return badriPays(m.id).map((r, i) => [bn(i + 1), r.payDate ? fmtDate(r.payDate) : "—", r.kind || badriKindDefault(m.subType || "মাসিক"), badriPeriod(r), Number(r.amount || 0), r.receiptNo ? bn(r.receiptNo) : "—", badriStatusLabel(r.status)]);
+}
+
 /* ============================ ছাত্র হাজিরা ============================ */
 function studentsInClass(className){
   if(className === "সকল শ্রেণী") return db.students;
@@ -5209,6 +5860,55 @@ function handleFormSubmit(type, fd, form, photoDataUrl){
     db.bookLinks = db.bookLinks || [];
     db.bookLinks.unshift({ id:uid(), t:(fd.get("title")||"").trim(), level:fd.get("level")||"অন্যান্য", url, note:(fd.get("note")||"").trim() });
     saveDB(); renderContent(); return;
+  }
+  if(type==="badriMember"){
+    const name = (fd.get("name") || "").trim(); if(!name) return;
+    const tp = badriType(currentTab);
+    const serialIn = parseInt(bnDigitsToEn(fd.get("serial") || ""), 10);
+    const mine = miscState.badriEdit ? db.patronMembers.find(x => x.id === miscState.badriEdit) : null;
+    const serial = serialIn > 0 ? serialIn : badriNextSerial(tp);
+    if(badriMembers(tp).some(x => Number(x.serial) === serial && (!mine || x.id !== mine.id))){ alert("সদস্য নং " + bn(serial) + " এই তালিকায় আগে থেকেই আছে। অন্য নম্বর দিন।"); return; }
+    const rec = { name, serial, fatherName: (fd.get("fatherName") || "").trim(), mobile: (fd.get("mobile") || "").trim(), address: (fd.get("address") || "").trim(), amount: fd.get("amount") || "", joinDate: fd.get("joinDate") || todayISO(), note: (fd.get("note") || "").trim() };
+    if(miscState.badriEdit){ const m = db.patronMembers.find(x => x.id === miscState.badriEdit); if(m) Object.assign(m, rec); miscState.badriEdit = ""; }
+    else db.patronMembers.unshift(Object.assign({ id: uid(), subType: tp }, rec));
+    saveDB(); renderContent(); return;
+  }
+  if(type==="badriPayment"){
+    const memberId = fd.get("memberId"), amount = Number(fd.get("amount"));
+    const m = db.patronMembers.find(x => x.id === memberId);
+    if(!m || !(amount >= 0) || fd.get("amount") === ""){ alert("পরিমাণ লিখুন।"); return; }
+    badriAddPayments({ memberId, amount, status: fd.get("status") === "বাকি" ? "বাকি" : "পরিশোধিত", kind: fd.get("kind") || badriKindDefault(m.subType || "মাসিক"), date: fd.get("date") || todayISO(), month: fd.get("month"), year: fd.get("year"), receiptNo: fd.get("receiptNo"), count: fd.get("count") });
+    saveDB(); renderContent(); return;
+  }
+  if(type==="user"){
+    const name = (fd.get("name") || "").trim(), mobRaw = (fd.get("mobile") || "").trim();
+    const mob = mobRaw ? normalizeMobile(mobRaw) : "", role = fd.get("role") || "teacher", c1 = fd.get("code") || "", c2 = fd.get("code2") || "";
+    const emailRaw = (fd.get("email") || "").trim(), email = emailRaw ? normEmail(emailRaw) : "";
+    const useCode = !!(mobRaw || c1);
+    if(!name){ alert("নাম লিখুন।"); return; }
+    if(!useCode && !email){ alert("মোবাইল নম্বর ও কোড, অথবা Gmail — কমপক্ষে একটি দিন।"); return; }
+    if(useCode){
+      if(mob.length < 10){ alert("সঠিক মোবাইল নম্বর দিন (১০ সংখ্যার বেশি)।"); return; }
+      if(!/^[0-9]{4,8}$/.test(c1)){ alert("কোড অবশ্যই ৪-৮ সংখ্যার হতে হবে।"); return; }
+      if(c1 !== c2){ alert("দুটি কোড মিলছে না।"); return; }
+      if((db.users || []).some(u => u.mobile === mob)){ alert("এই মোবাইল নম্বরে আগে থেকেই একজন ব্যবহারকারী আছে।"); return; }
+    }
+    if(email){
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ alert("সঠিক Gmail ঠিকানা দিন।"); return; }
+      if((db.users || []).some(u => u.email && normEmail(u.email) === email)){ alert("এই Gmail-এ আগে থেকেই একজন ব্যবহারকারী আছে।"); return; }
+    }
+    const salt = useCode ? randSalt() : "";
+    db.users = db.users || [];
+    db.users.push({ id: uid(), name, mobile: mob, mobileRaw: mobRaw, email: emailRaw, role, salt, hash: useCode ? hashUserCode(c1, salt) : "", active: true, created: todayISO() });
+    logActivity("ব্যবহারকারী যোগ", name + " — " + ((ROLE_DEFS[role] || {}).label || role));
+    saveDB(); renderContent(); return;
+  }
+  if(type==="googleLogin"){
+    const cid = (fd.get("clientId") || "").trim();
+    if(cid && !/\.apps\.googleusercontent\.com$/.test(cid)){ alert("Client ID সাধারণত .apps.googleusercontent.com দিয়ে শেষ হয়। আবার দেখে নিন।"); return; }
+    db.googleLogin = { clientId: cid }; saveDB(); renderContent();
+    alert(cid ? "Google লগইন সেটআপ সংরক্ষণ করা হয়েছে। এখন ব্যবহারকারীর Gmail যোগ করুন।" : "Google লগইন বন্ধ করা হয়েছে।");
+    return;
   }
   if(type==="committee"){
     const name = (fd.get("name")||"").trim(); if(!name) return;
@@ -6788,14 +7488,18 @@ document.addEventListener("click", function(e){
   if(e.target.closest("#exportBtn")){ exportData(); return; }
   if(e.target.closest("#importBtn")){ document.getElementById("importFile").click(); return; }
 
-  if(e.target.closest("#lockBtn")){ showLockOverlay("unlock"); return; }
-  if(e.target.closest("#changePinBtn")){ showLockOverlay("change"); return; }
+  if(e.target.closest("#lockBtn")){ currentUser = null; lockLoginMode = "user"; showLockOverlay("unlock"); if(pinLockSecondsLeft() > 0) startPinLockCountdown(); return; }
+  if(e.target.closest("#changePinBtn")){ if(currentUser && currentUser.id !== "owner"){ userChangeCode(); return; } showLockOverlay("change"); return; }
   if(e.target.closest("#pinChangeCancel")){ hideLockOverlay(); return; }
+  if(e.target.closest("#switchOwnerLogin")){ lockLoginMode = "owner"; showLockOverlay("unlock"); return; }
+  if(e.target.closest("#switchUserLogin")){ lockLoginMode = "user"; showLockOverlay("unlock"); return; }
   if(e.target.closest("#forgotPinLink")){ factoryResetForgotPin(); return; }
   if(e.target.closest("#guardianViewLink")){ showLockOverlay("guardian"); if(guardianLockSecondsLeft() > 0) startGuardianLockCountdown(); return; }
   if(e.target.closest("#guardianBackToLogin")){ showLockOverlay(getStoredPinHash() ? "unlock" : "set"); return; }
   if(e.target.closest("#guardianBack")){ currentGuardianStudent = null; showLockOverlay("guardian"); return; }
 
+  const gPick = e.target.closest("[data-guardian-pick]");
+  if(gPick){ currentGuardianStudent = guardianCandidates.find(x => x.id === gPick.dataset.guardianPick) || null; if(currentGuardianStudent) showLockOverlay("guardianResult"); return; }
   const pickStudentBtn = e.target.closest("[data-pick-student]");
   if(pickStudentBtn){
     const idx = pickStudentBtn.dataset.pickStudent.indexOf(":");
@@ -7466,6 +8170,201 @@ document.addEventListener("change", function(e){
 });
 document.addEventListener("input", function(e){
   if(e.target.closest("#vcBox") && e.target.name === "text") miscState.vcText = e.target.value;
+});
+
+/* ব্যবহার নির্দেশিকার ইভেন্ট */
+document.addEventListener("click", function(e){
+  const go = e.target.closest("[data-guide-go]");
+  if(go){ e.preventDefault(); setTab(go.dataset.guideGo); window.scrollTo(0, 0); return; }
+  const a = e.target.closest("[data-action]");
+  if(!a) return;
+  if(a.dataset.action === "guide-open-all"){ document.querySelectorAll("#guideList details").forEach(d => d.open = true); return; }
+  if(a.dataset.action === "guide-close-all"){ document.querySelectorAll("#guideList details").forEach(d => d.open = false); return; }
+  if(a.dataset.action === "guide-print"){ openResultDoc(guideHTML()); return; }
+  if(a.dataset.action === "guide-word"){ exportGuideWord(); return; }
+});
+document.addEventListener("input", function(e){
+  if(e.target.id !== "guideSearch") return;
+  const q = e.target.value.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll("#guideList details[data-guide-sec]").forEach(d => {
+    const hit = !q || d.textContent.toLowerCase().includes(q);
+    d.style.display = hit ? "" : "none";
+    d.open = !!q && hit;
+    if(hit) shown++;
+  });
+  const em = document.getElementById("guideEmpty"); if(em) em.style.display = shown ? "none" : "block";
+});
+
+/* ব্যবহারকারী ব্যবস্থাপনার ইভেন্ট */
+document.addEventListener("click", function(e){
+  const rs = e.target.closest("[data-user-reset]");
+  if(rs){
+    const u = (db.users || []).find(x => x.id === rs.dataset.userReset); if(!u) return;
+    if(!u.mobile){ alert("এই ব্যবহারকারীর মোবাইল নম্বর নেই। কোড দিয়ে লগইনের জন্য আগে নতুন করে মোবাইলসহ যোগ করুন।"); return; }
+    const n1 = prompt(u.name + " এর নতুন কোড লিখুন (৪-৮ সংখ্যা)");
+    if(n1 === null) return;
+    if(!/^[0-9]{4,8}$/.test(n1)){ alert("কোড অবশ্যই ৪-৮ সংখ্যার হতে হবে।"); return; }
+    u.salt = randSalt(); u.hash = hashUserCode(n1, u.salt); saveDB(); alert("কোড রিসেট করা হয়েছে।");
+    return;
+  }
+  const em = e.target.closest("[data-user-email]");
+  if(em){
+    const u = (db.users || []).find(x => x.id === em.dataset.userEmail); if(!u) return;
+    const v = prompt(u.name + " এর Gmail লিখুন (মুছতে ফাঁকা রাখুন)", u.email || "");
+    if(v === null) return;
+    const t = v.trim();
+    if(t && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t)){ alert("সঠিক Gmail ঠিকানা দিন।"); return; }
+    if(t && (db.users || []).some(x => x.id !== u.id && x.email && normEmail(x.email) === normEmail(t))){ alert("এই Gmail অন্য ব্যবহারকারীর আছে।"); return; }
+    if(!t && !u.hash){ alert("এই ব্যবহারকারীর আর কোনো লগইন পদ্ধতি নেই, তাই Gmail মুছা যাবে না।"); return; }
+    u.email = t; saveDB(); renderContent();
+    return;
+  }
+  const tg = e.target.closest("[data-user-toggle]");
+  if(tg){ const u = (db.users || []).find(x => x.id === tg.dataset.userToggle); if(u){ u.active = u.active === false; saveDB(); renderContent(); } return; }
+  const dl = e.target.closest("[data-user-del]");
+  if(dl){
+    const u = (db.users || []).find(x => x.id === dl.dataset.userDel);
+    if(u && confirm(u.name + " কে মুছে ফেলবেন?")){ db.users = db.users.filter(x => x.id !== u.id); logActivity("ব্যবহারকারী মোছা", u.name); saveDB(); renderContent(); }
+    return;
+  }
+});
+
+/* বদরী প্রোফাইল ও তথ্যবহির ইভেন্ট */
+document.addEventListener("click", function(e){
+  const op = e.target.closest("[data-badri-open]");
+  if(op){ miscState.badriProfile = op.dataset.badriOpen; miscState.badriEdit = ""; renderContent(); window.scrollTo(0, 0); return; }
+  if(e.target.closest("[data-badri-back]")){ miscState.badriProfile = ""; miscState.badriEdit = ""; renderContent(); window.scrollTo(0, 0); return; }
+  const ed = e.target.closest("[data-badri-edit]");
+  if(ed){ miscState.badriEdit = ed.dataset.badriEdit; const m = db.patronMembers.find(x => x.id === miscState.badriEdit); if(m && !miscState.badriProfile) miscState.badriProfile = ""; renderContent(); setTimeout(() => { const f = document.getElementById("badriForm"); if(f) f.scrollIntoView({ behavior: "smooth" }); }, 50); return; }
+  const dm = e.target.closest("[data-badri-del-member]");
+  if(dm){
+    const m = db.patronMembers.find(x => x.id === dm.dataset.badriDelMember); if(!m) return;
+    if(!confirm(m.name + " কে এবং তাঁর সব আদায়ের হিসাব মুছে ফেলবেন? এটি ফেরানো যাবে না।")) return;
+    db.patronPayments = db.patronPayments.filter(r => r.memberId !== m.id);
+    db.patronMembers = db.patronMembers.filter(x => x.id !== m.id);
+    logActivity("বদরী সদস্য মোছা", m.name);
+    miscState.badriProfile = ""; saveDB(); renderContent(); return;
+  }
+  const rc = e.target.closest("[data-badri-receipt]");
+  if(rc){
+    const r = db.patronPayments.find(x => x.id === rc.dataset.badriReceipt); const m = r && db.patronMembers.find(x => x.id === r.memberId);
+    if(!r || !m) return;
+    printDonationReceipts([{ party: m.name, donorFather: m.fatherName || "", donorAddress: m.address || "", desc: (r.kind || badriKindDefault(m.subType || "মাসিক")) + " — " + badriPeriod(r) + (r.status === "বাকি" ? " (বাকি)" : ""), amount: r.amount, date: r.payDate || r.entryDate || todayISO(), no: r.receiptNo || "" }]);
+    return;
+  }
+  const a = e.target.closest("[data-action]");
+  if(!a || !/^badri-/.test(a.dataset.action)) return;
+  const act = a.dataset.action, type = badriType(currentTab);
+  const prof = miscState.badriProfile ? db.patronMembers.find(x => x.id === miscState.badriProfile) : null;
+  if(act === "badri-delete-all"){
+    const mem = badriMembers(type);
+    if(!mem.length){ alert("মোছার মতো কোনো " + type + " বদরী সদস্য নেই।"); return; }
+    const ids = new Set(mem.map(x => x.id));
+    const pays = db.patronPayments.filter(r => ids.has(r.memberId));
+    const paid = pays.filter(r => r.status === "পরিশোধিত").reduce((a, r) => a + Number(r.amount || 0), 0);
+    if(!confirm("⚠️ সতর্কতা!\n\n" + type + " বদরীর সব " + bn(mem.length) + " জন সদস্য এবং তাঁদের সব আদায়-বাকির হিসাব (" + bn(pays.length) + "টি এন্ট্রি, নগদ আদায় " + taka(paid) + ") চিরতরে মুছে যাবে।\n\nএটি ফেরানো যাবে না। আপনি কি এগিয়ে যেতে চান?")) return;
+    if(confirm("মোছার আগে একটি ব্যাকআপ ফাইল নামিয়ে নেবেন? (প্রস্তাবিত — ভুল হলে ব্যাকআপ থেকে ফেরানো যাবে)")){ try{ exportData(); }catch(err){} }
+    if(!confirm("🔴 শেষবারের মতো নিশ্চিত করুন:\n" + bn(mem.length) + " জন " + type + " বদরী সদস্য ও তাঁদের সব হিসাব এখনই মুছে যাবে।\n\n'OK' চাপলে মুছে যাবে।")) return;
+    db.patronPayments = db.patronPayments.filter(r => !ids.has(r.memberId));
+    db.patronMembers = db.patronMembers.filter(x => !ids.has(x.id));
+    logActivity("সব " + type + " বদরী মোছা", bn(mem.length) + " জন সদস্য, " + bn(pays.length) + "টি এন্ট্রি");
+    miscState.badriProfile = ""; miscState.badriEdit = ""; miscState.badriLast = null; miscState.badriQuick = { q: "", open: "" };
+    saveDB(); renderContent();
+    alert(bn(mem.length) + " জন " + type + " বদরী সদস্য ও তাঁদের হিসাব মুছে ফেলা হয়েছে।");
+    return;
+  }
+  if(act === "badri-cancel-edit"){ miscState.badriEdit = ""; renderContent(); return; }
+  if(act === "badri-print-all"){
+    const list = badriMembers(type).slice().reverse();
+    if(!list.length){ alert("এখনো কোনো সদস্য নেই।"); return; }
+    openResultDoc(badriBookDoc(list.map(m => ({ m, pays: badriPays(m.id), type })), "দাতা তথ্যবহি — " + type + " বদরী"));
+    return;
+  }
+  if(act === "badri-print-blank"){
+    const n = parseInt(prompt("কয়টি ফাঁকা তথ্যবহির পৃষ্ঠা ছাপাবেন?", "10"), 10);
+    if(!n || n < 1) return;
+    openResultDoc(badriBookDoc(Array.from({ length: Math.min(n, 200) }, () => ({ m: null, pays: [], type })), "ফাঁকা দাতা তথ্যবহি"));
+    return;
+  }
+  if(act === "badri-print-one"){ if(prof) openResultDoc(badriBookDoc([{ m: prof, pays: badriPays(prof.id), type: prof.subType || "মাসিক" }], "দাতা তথ্যবহি — " + prof.name)); return; }
+  if(act === "badri-export-one"){
+    if(!prof) return;
+    const t = badriTotals(prof.id);
+    exportSingleTable({ file: "বদরী-তথ্যবহি-" + prof.name, title: "দাতা তথ্যবহি — " + prof.name, head: ["ক্রম","আদায়ের তারিখ","প্রকার","মাস/বছর","পরিমাণ","রশিদ নং","নগদ/বাকি"], rows: badriExportRows(prof),
+      totals: ["", "", "", "মোট আদায় (নগদ)", t.paid, "মোট বাকি", t.due],
+      notes: ["সদস্য নং " + bn(badriSerial(prof)) + " • " + (prof.mobile || "") + (prof.address ? " • " + prof.address : "")], formats: ["xlsx", "docx"] });
+    return;
+  }
+  if(act === "badri-export-list"){
+    const list = badriMembers(type).slice().reverse();
+    exportSingleTable({ file: type + "-বদরী-তালিকা", title: type + " বদরী সদস্যবৃন্দ", head: ["সদস্য নং","নাম","পিতার নাম","মোবাইল","ঠিকানা","চাঁদা","সদস্য হওয়ার তারিখ","মোট আদায়","মোট বাকি"],
+      rows: list.map(m => { const t = badriTotals(m.id); return [bn(badriSerial(m)), m.name, m.fatherName || "", m.mobile || "", m.address || "", Number(m.amount || 0), m.joinDate ? fmtDate(m.joinDate) : "", t.paid, t.due]; }), formats: ["xlsx", "docx"] });
+    return;
+  }
+  if(act === "badri-gen-dues"){
+    const now = new Date(), month = MONTHS_BN[now.getMonth()], year = String(now.getFullYear());
+    const kind = badriKindDefault(type);
+    const members = badriMembers(type).filter(m => Number(m.amount || 0) > 0);
+    let added = 0;
+    members.forEach(m => {
+      const exists = db.patronPayments.some(r => r.memberId === m.id && r.year === year && (type === "বাৎসরিক" ? true : r.month === month) && /চাঁদা/.test(r.kind || kind));
+      if(exists) return;
+      db.patronPayments.unshift({ id: uid(), memberId: m.id, month: type === "বাৎসরিক" ? "" : month, year, amount: String(m.amount), status: "বাকি", payDate: "", entryDate: todayISO(), kind, receiptNo: "" });
+      added++;
+    });
+    if(!members.length){ alert("কোনো সদস্যের চাঁদার পরিমাণ ঠিক করা নেই।"); return; }
+    saveDB(); renderContent();
+    alert(bn(added) + " জনের " + (type === "বাৎসরিক" ? bn(year) + " সালের" : month + " " + bn(year) + " এর") + " বাকি যোগ করা হয়েছে" + (members.length - added ? " (" + bn(members.length - added) + " জনের আগে থেকেই ছিল)।" : "।"));
+    return;
+  }
+});
+
+/* সদস্য খুঁজে দ্রুত টাকা পরিশোধ */
+document.addEventListener("input", function(e){
+  if(!e.target.matches("[data-bq-input]")) return;
+  miscState.badriQuick = Object.assign(miscState.badriQuick || {}, { q: e.target.value, open: "" });
+  renderBadriResults();
+});
+document.addEventListener("click", function(e){
+  const tg = e.target.closest("[data-bq-toggle]");
+  if(tg){ const bq = miscState.badriQuick = miscState.badriQuick || {}; bq.open = bq.open === tg.dataset.bqToggle ? "" : tg.dataset.bqToggle; renderBadriResults(); return; }
+  const pf = e.target.closest("[data-bq-profile]");
+  if(pf){
+    const m = db.patronMembers.find(x => x.id === pf.dataset.bqProfile); if(!m) return;
+    miscState.badriProfile = m.id; miscState.badriEdit = "";
+    const target = (m.subType || "মাসিক") === "বাৎসরিক" ? "badriAnnual" : "badriMonthly";
+    if(currentTab !== target) setTab(target); else renderContent();
+    window.scrollTo(0, 0); return;
+  }
+  const rp = e.target.closest("[data-bq-receipt-print]");
+  if(rp){ printBadriReceipt(rp.dataset.bqReceiptPrint.split(",")); return; }
+  const dd = e.target.closest("[data-bq-do-dues]");
+  if(dd){
+    const panel = dd.closest("[data-bq-panel]");
+    const m = db.patronMembers.find(x => x.id === dd.dataset.bqDoDues); if(!m) return;
+    const ids = [...panel.querySelectorAll("[data-bq-due]:checked")].map(c => c.dataset.bqDue);
+    if(!ids.length){ alert("অন্তত একটি বাকি বাছুন।"); return; }
+    const rno = panel.querySelector("[data-bq-receipt]").value.trim();
+    let total = 0;
+    ids.forEach(id => { const r = db.patronPayments.find(x => x.id === id); if(r){ r.status = "পরিশোধিত"; r.payDate = todayISO(); if(rno) r.receiptNo = rno; total += Number(r.amount || 0); } });
+    logActivity("বদরী বাকি আদায়", m.name + " — " + taka(total));
+    miscState.badriLast = { ids, text: m.name + " এর " + taka(total) + " আদায় হয়েছে" };
+    if(miscState.badriQuick) miscState.badriQuick.open = "";
+    saveDB(); renderContent(); return;
+  }
+  const dn = e.target.closest("[data-bq-do-new]");
+  if(dn){
+    const panel = dn.closest("[data-bq-panel]");
+    const m = db.patronMembers.find(x => x.id === dn.dataset.bqDoNew); if(!m) return;
+    const g = sel => { const el = panel.querySelector(sel); return el ? el.value : ""; };
+    const amount = Number(g("[data-bq-amount]"));
+    if(!g("[data-bq-amount]") || !(amount > 0)){ alert("পরিমাণ লিখুন।"); return; }
+    const ids = badriAddPayments({ memberId: m.id, amount, status: "পরিশোধিত", kind: g("[data-bq-kind]"), date: g("[data-bq-date]") || todayISO(), month: g("[data-bq-month]"), year: g("[data-bq-year]"), receiptNo: g("[data-bq-receipt]"), count: g("[data-bq-count]") });
+    miscState.badriLast = { ids, text: m.name + " এর " + taka(amount * ids.length) + " আদায় হয়েছে" };
+    if(miscState.badriQuick) miscState.badriQuick.open = "";
+    saveDB(); renderContent(); return;
+  }
 });
 </script>
 </body>
