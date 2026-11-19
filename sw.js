@@ -1,4 +1,4 @@
-const CACHE_NAME = "madrasa-app-cache-v52";
+const CACHE_NAME = "madrasa-app-cache-v55";
 const URLS_TO_CACHE = [
   "./index.html",
   "./manifest.json",
@@ -36,7 +36,6 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(req)
       .then((response) => {
-        if(!response || !response.ok || response.type === "opaque") return response;
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
         return response;
